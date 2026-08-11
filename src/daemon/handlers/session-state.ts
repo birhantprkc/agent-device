@@ -297,6 +297,7 @@ export async function handleSessionStateCommands(params: {
       ensureReady: false,
       flags,
       session: activeSession,
+      androidAvdSelection: 'include-stopped',
     });
     const inspectFacts = requireInspectFacts(params.inspectFacts);
     const facts = await inspectFacts(device);

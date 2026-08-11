@@ -13,7 +13,7 @@ import { recordRuntimeDaemonMechanicsViolations } from './record-runtime-mechani
  * every row, and `cutoverRowDefects` rejects a row that leaves its claims unstated.
  *
  * Rule ids are per row: the layering report groups violations under R22 appstate,
- * R20 boot, R21 apps, R17 devices, R14 logs, R15 network, R16 record.
+ * R20 boot, R21 apps, R23 shutdown, R17 devices, R14 logs, R15 network, R16 record.
  */
 export const MIGRATED_COMMAND_CUTOVERS: readonly MigratedCommandCutover[] = [
   {
@@ -90,6 +90,27 @@ export const MIGRATED_COMMAND_CUTOVERS: readonly MigratedCommandCutover[] = [
       operationOwners: {
         ensureReady: ['ensureAppsRuntimeReady'],
         listApps: ['listAppsFromRuntime'],
+      },
+    },
+  },
+  {
+    rule: 'R23 shutdown-runtime-cutover',
+    command: 'shutdown',
+    subject: 'shutdown',
+    tier: 'request-scoped',
+    execution: 'device-runtime',
+    legacyRetirement: {
+      modulePaths: ['src/daemon/target-shutdown.ts'],
+      importPatterns: [/(?:^|\/)target-shutdown(?:\.[cm]?[jt]s)?$/],
+      routeNames: ['canShutdownDeviceTarget', 'shutdownDeviceTarget'],
+    },
+    runtimeTypeNames: ['DeviceShutdownRuntimeOperations'],
+    operations: { names: ['shutdownTarget'] },
+    singularExecution: {
+      routes: ['handleSessionStateCommands'],
+      operations: ['shutdownTarget'],
+      operationOwners: {
+        shutdownTarget: ['handleSessionStateCommands'],
       },
     },
   },

@@ -52,8 +52,8 @@ test.each([
     leaves.watchos,
     false,
     'watchOS app logs are not supported',
-    true,
-    undefined,
+    false,
+    'unsupported-platform-leaf',
   ],
 ])(
   'classifies the %s leaf explicitly',

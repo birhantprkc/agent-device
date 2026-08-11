@@ -97,7 +97,9 @@ function isAndroidEmulator(device: DeviceInfo): boolean {
 }
 
 function isShutdownDevice(device: DeviceInfo): boolean {
-  return isIosFamily(device) ? device.kind === 'simulator' : isAndroidEmulator(device);
+  return isIosFamily(device) && device.appleOs !== 'watchos'
+    ? device.kind === 'simulator'
+    : isAndroidEmulator(device);
 }
 
 function readinessBinding(device: DeviceInfo): DeviceBinding<PlatformRuntimeOperations> {

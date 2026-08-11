@@ -38,7 +38,7 @@ const shutdownKindUnavailable = Object.freeze({
 } as const);
 
 function shutdownFact(device: DeviceInfo) {
-  if (!isIosFamily(device)) return unavailable;
+  if (!isIosFamily(device) || device.appleOs === 'watchos') return unavailable;
   return device.kind === 'simulator' ? available : shutdownKindUnavailable;
 }
 

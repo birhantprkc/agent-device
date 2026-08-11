@@ -448,7 +448,7 @@ test('shutdown turns off selected Android emulator', async () => {
     name: 'Pixel_9_Pro_XL',
     kind: 'emulator',
     target: 'mobile',
-    booted: true,
+    booted: false,
   });
 
   const response = await handleSessionCommands({
@@ -468,6 +468,10 @@ test('shutdown turns off selected Android emulator', async () => {
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(true);
   expect(mockEnsureDeviceReady).not.toHaveBeenCalled();
+  expect(mockResolveTargetDevice).toHaveBeenCalledWith(
+    { platform: 'android', device: 'Pixel_9_Pro_XL' },
+    { androidAvdSelection: 'include-stopped' },
+  );
   expect(mockInspectDeviceRuntimeFacts).toHaveBeenCalledOnce();
   expect(mockBindDeviceRuntime).toHaveBeenCalledOnce();
   expect(mockShutdownTargetRuntime).toHaveBeenCalledOnce();
