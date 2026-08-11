@@ -310,6 +310,10 @@ test.each([
   await expect(
     binding.operations.listApps?.({ device: runtimeDevice, filter: 'all' }),
   ).resolves.toEqual([]);
+  expect(binding.facts.operations.shutdownTarget).toMatchObject({
+    available: false,
+    reason: 'unsupported-provider-mode',
+  });
   await expect(binding.operations.ensureReady?.({})).resolves.toMatchObject({
     id: runtimeDevice.id,
     booted: true,
@@ -431,6 +435,14 @@ function unusedHost(): PlatformRuntimeHost {
       applePhysical: { ensureConnected: async () => {} },
       appleAutomation: { keepHot: () => {} },
       androidEmulator: { discover: async () => [], launch: () => 1, terminate: async () => {} },
+    },
+    deviceShutdown: {
+      apple: {
+        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+      },
+      android: {
+        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+      },
     },
     screenRecording: unusedScreenRecordingHost(),
   };

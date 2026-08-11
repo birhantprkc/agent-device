@@ -298,6 +298,11 @@ function facts(device: DeviceInfo): RuntimeFacts<PlatformRuntimeOperations> {
       bootTarget: available,
       bootTargetHeadless: headlessUnavailable,
       listApps: available,
+      shutdownTarget: {
+        available: false,
+        reason: 'unsupported-provider-mode',
+        hint: 'Limrun owns the target lifecycle for provider-owned devices.',
+      },
     },
   });
 }

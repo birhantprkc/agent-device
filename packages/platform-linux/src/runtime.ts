@@ -12,5 +12,6 @@ export function createLinuxPlatformRuntime(): PlatformRuntimeOwner {
   return createUnavailablePlatformRuntimeOwner('linux', {
     appLog: unavailable,
     network: unavailable,
+    shutdown: unavailable,
   });
 }

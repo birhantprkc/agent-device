@@ -10,7 +10,7 @@ import {
   makeSessionStore,
 } from '../../../__tests__/test-utils/index.ts';
 import { withTestDeviceInventoryProvider as withTargetDeviceResolutionScope } from '../../../__tests__/test-utils/device-inventory-gateways.ts';
-import type { DeviceInfo } from '@agent-device/kernel/device';
+import { isIosFamily, type DeviceInfo } from '@agent-device/kernel/device';
 import {
   localRuntimeOwner,
   narrowDeviceBinding,
@@ -78,6 +78,7 @@ test('capabilities reports supported commands for the selected session device', 
       'perf',
       PUBLIC_COMMANDS.logs,
       PUBLIC_COMMANDS.gesture,
+      PUBLIC_COMMANDS.shutdown,
     ]),
   );
   expect(response.data?.availableCommands).not.toContain(PUBLIC_COMMANDS.capabilities);
@@ -134,6 +135,7 @@ test('capabilities excludes logs from an unavailable provider-mode XCTest runtim
   expect(response.data?.availableCommands).not.toContain(PUBLIC_COMMANDS.logs);
   expect(response.data?.availableCommands).not.toContain(PUBLIC_COMMANDS.apps);
   expect(response.data?.availableCommands).toContain(PUBLIC_COMMANDS.network);
+  expect(response.data?.availableCommands).not.toContain(PUBLIC_COMMANDS.shutdown);
   expect(runtime.uses).toEqual([
     { required: [], preferred: ['appLogInspect'] },
     { required: [], preferred: ['networkDump'] },
@@ -439,6 +441,11 @@ test('capabilities accepts a stopped Android AVD placeholder for explicit platfo
     booted: false,
   };
   const sessionStore = makeSessionStore('agent-device-capabilities-stopped-avd-');
+  const runtime = createAdmissionRuntime({
+    appLogAvailable: false,
+    networkAvailable: false,
+    providerMode: 'local',
+  });
 
   const response = await withTargetDeviceResolutionScope(
     async (request) => (request.platform === 'android' ? [stoppedAvd] : []),
@@ -454,6 +461,8 @@ test('capabilities accepts a stopped Android AVD placeholder for explicit platfo
         sessionName: 'default',
         logPath: path.join(os.tmpdir(), 'daemon.log'),
         sessionStore,
+        bindDevice: runtime.bindDevice,
+        inspectFacts: runtime.inspectFacts,
         invoke: async () => ({ ok: true, data: {} }),
       }),
   );
@@ -470,6 +479,7 @@ test('capabilities accepts a stopped Android AVD placeholder for explicit platfo
   expect(response.data?.availableCommands).toEqual(
     expect.arrayContaining(['open', 'screenshot', 'snapshot', 'press', 'fill']),
   );
+  expect(response.data?.availableCommands).toContain(PUBLIC_COMMANDS.shutdown);
 });
 
 function createAdmissionRuntime(options: {
@@ -570,7 +580,21 @@ function createAdmissionOperationFacts(
     bootTarget: unavailable,
     bootTargetHeadless: unavailable,
     listApps: appsFact,
+    shutdownTarget: shutdownFact(device, options.providerMode),
   };
+}
+
+function shutdownFact(device: DeviceInfo, providerMode: RuntimeProviderMode) {
+  return providerMode === 'local' && isShutdownDevice(device)
+    ? { available: true as const }
+    : unavailableOperationFact(providerMode);
+}
+
+function isShutdownDevice(device: DeviceInfo): boolean {
+  return (
+    (isIosFamily(device) && device.kind === 'simulator') ||
+    (device.platform === 'android' && device.kind === 'emulator')
+  );
 }
 
 function createAdmissionOperations(options: AdmissionRuntimeOptions) {

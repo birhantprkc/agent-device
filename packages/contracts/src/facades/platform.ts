@@ -202,6 +202,7 @@ export {
   resolveDeviceReadinessRuntimePlan,
   appStateRuntimeUses,
   appStateUse,
+  shutdownTargetUse,
 } from '../platform-runtime-operations.ts';
 export type { DeviceReadinessRuntimePlan } from '../platform-runtime-operations.ts';
 export type {
@@ -216,6 +217,10 @@ export type {
   DeviceReadinessRuntimeOperations,
   EnsureReadyInput,
 } from '../device-readiness-runtime.ts';
+export type {
+  DeviceShutdownRuntimeHost,
+  DeviceShutdownRuntimeOperations,
+} from '../device-shutdown-runtime.ts';
 export {
   appLogAdmissionUse,
   appLogRuntimePlanUses,

@@ -21,6 +21,7 @@ import {
   inventoryUse,
   networkDumpUse,
   screenRecordingRuntimePlanUses,
+  shutdownTargetUse,
 } from '@agent-device/contracts/platform';
 import { readDeclaredPlatformExecution } from './platform-execution-entry.ts';
 import type {
@@ -516,14 +517,9 @@ export const RAW_COMMAND_DESCRIPTORS = [
     catalog: { group: 'public' },
     recordsSessionAction: false,
     daemon: { route: 'session', refFrameEffect: 'may-invalidate', sessionKind: 'state' },
-    capability: {
-      apple: { simulator: true },
-      android: { emulator: true },
-      linux: LINUX_NONE,
-    },
+    platformExecution: { kind: 'device-runtime', use: shutdownTargetUse },
     timeoutPolicy: DEFAULT_TIMEOUT_POLICY,
     batchable: true,
-    platformExecution: LEGACY_PLATFORM_EXECUTION,
   },
   {
     name: 'appstate',

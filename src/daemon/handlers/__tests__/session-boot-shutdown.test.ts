@@ -5,8 +5,6 @@ import { AppError } from '@agent-device/kernel/errors';
 import {
   mockResolveTargetDevice,
   mockEnsureDeviceReady,
-  mockRunCmd,
-  mockShutdownSimulator,
   makeSessionStore,
   makeSession,
   noopInvoke,
@@ -18,6 +16,7 @@ import {
   mockEnsureReadyHeadlessRuntime,
   mockEnsureReadyRuntime,
   mockInspectDeviceRuntimeFacts,
+  mockShutdownTargetRuntime,
 } from './session-command-harness.ts';
 
 test('boot requires session or explicit selector', async () => {
@@ -384,7 +383,9 @@ test('shutdown turns off selected iOS simulator', async () => {
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(true);
   expect(mockEnsureDeviceReady).not.toHaveBeenCalled();
-  expect(mockShutdownSimulator).toHaveBeenCalledWith(selectedDevice);
+  expect(mockInspectDeviceRuntimeFacts).toHaveBeenCalledOnce();
+  expect(mockBindDeviceRuntime).toHaveBeenCalledOnce();
+  expect(mockShutdownTargetRuntime).toHaveBeenCalledOnce();
   if (response && response.ok) {
     expect(response.data?.platform).toBe('ios');
     expect(response.data?.id).toBe('sim-2');
@@ -427,7 +428,9 @@ test('shutdown rejects active session device and points to close --shutdown', as
 
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(false);
-  expect(mockShutdownSimulator).not.toHaveBeenCalled();
+  expect(mockInspectDeviceRuntimeFacts).toHaveBeenCalledOnce();
+  expect(mockBindDeviceRuntime).not.toHaveBeenCalled();
+  expect(mockShutdownTargetRuntime).not.toHaveBeenCalled();
   if (response && !response.ok) {
     expect(response.error.code).toBe('DEVICE_IN_USE');
     expect(response.error.message).toMatch(/close --shutdown/i);
@@ -465,11 +468,9 @@ test('shutdown turns off selected Android emulator', async () => {
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(true);
   expect(mockEnsureDeviceReady).not.toHaveBeenCalled();
-  expect(mockRunCmd).toHaveBeenCalledWith(
-    'adb',
-    ['-s', 'emulator-5554', 'emu', 'kill'],
-    expect.objectContaining({ allowFailure: true, timeoutMs: 15_000 }),
-  );
+  expect(mockInspectDeviceRuntimeFacts).toHaveBeenCalledOnce();
+  expect(mockBindDeviceRuntime).toHaveBeenCalledOnce();
+  expect(mockShutdownTargetRuntime).toHaveBeenCalledOnce();
   if (response && response.ok) {
     expect(response.data?.platform).toBe('android');
     expect(response.data?.id).toBe('emulator-5554');
@@ -509,8 +510,9 @@ test('shutdown rejects unsupported physical devices', async () => {
 
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(false);
-  expect(mockShutdownSimulator).not.toHaveBeenCalled();
-  expect(mockRunCmd).not.toHaveBeenCalled();
+  expect(mockInspectDeviceRuntimeFacts).toHaveBeenCalledOnce();
+  expect(mockBindDeviceRuntime).not.toHaveBeenCalled();
+  expect(mockShutdownTargetRuntime).not.toHaveBeenCalled();
   if (response && !response.ok) {
     expect(response.error.code).toBe('UNSUPPORTED_OPERATION');
     expect(response.error.message).toMatch(/Apple simulators and Android emulators/i);
@@ -528,7 +530,7 @@ test('shutdown returns an error response when selected target shutdown fails', a
     booted: true,
   };
   mockResolveTargetDevice.mockResolvedValue(selectedDevice);
-  mockShutdownSimulator.mockResolvedValue({
+  mockShutdownTargetRuntime.mockResolvedValue({
     success: false,
     exitCode: 149,
     stdout: '',

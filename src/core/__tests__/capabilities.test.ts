@@ -148,17 +148,6 @@ test('device capability matrix stays consistent across shared command groups', (
       ],
     },
     {
-      commands: ['shutdown'],
-      checks: [
-        { device: iosSimulator, expected: true, label: 'on iOS sim' },
-        { device: iosDevice, expected: false, label: 'on iOS device' },
-        { device: androidEmulator, expected: true, label: 'on Android emulator' },
-        { device: androidDevice, expected: false, label: 'on Android device' },
-        { device: macOsDevice, expected: false, label: 'on macOS' },
-        { device: tvOsSimulator, expected: true, label: 'on tvOS simulator' },
-      ],
-    },
-    {
       commands: ['reinstall', 'install'],
       checks: [
         { device: iosSimulator, expected: true, label: 'on iOS sim' },
@@ -307,7 +296,17 @@ test('macOS supports the Apple runner interaction core but excludes mobile-only 
 
 test('tvOS follows iOS capability matrix by device kind', () => {
   assertCommandSupport(
-    ['open', 'close', 'screenshot', 'trigger-app-event', 'logs', 'reinstall', 'boot', 'shutdown'],
+    [
+      'open',
+      'close',
+      'apps',
+      'screenshot',
+      'trigger-app-event',
+      'logs',
+      'reinstall',
+      'boot',
+      'shutdown',
+    ],
     [{ device: tvOsSimulator, expected: true, label: 'on tvOS' }],
   );
   assertCommandSupport(
@@ -382,7 +381,6 @@ test('Linux supports desktop interaction commands and blocks mobile/unsupported 
       'reinstall',
       'orientation',
       'settings',
-      'shutdown',
       'trigger-app-event',
     ],
     [{ device: linuxDevice, expected: false, label: 'on Linux' }],
@@ -429,7 +427,6 @@ test('web supports only the initial browser interaction slice', () => {
       'reinstall',
       'orientation',
       'settings',
-      'shutdown',
       'swipe',
       'trigger-app-event',
     ],

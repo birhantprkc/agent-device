@@ -198,6 +198,7 @@ function makeRuntime(session: SessionState, options: RuntimeOptions = {}) {
         bootTarget: unavailable,
         bootTargetHeadless: unavailable,
         listApps: unavailable,
+        shutdownTarget: unavailable,
       },
     },
     operations,

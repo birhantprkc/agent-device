@@ -400,6 +400,7 @@ function unavailableFacts() {
     bootTarget: unavailable,
     bootTargetHeadless: unavailable,
     listApps: unavailable,
+    shutdownTarget: unavailable,
   };
 }
 

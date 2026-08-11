@@ -239,6 +239,7 @@ function createRecordingPlatformRuntimeGateway(params: {
             bootTarget: unavailableRecording,
             bootTargetHeadless: unavailableRecording,
             listApps: unavailableRecording,
+            shutdownTarget: unavailableRecording,
           },
         },
         operations: {

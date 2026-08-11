@@ -55,6 +55,7 @@ export function createNetworkRuntime(
             bootTarget: unavailable,
             bootTargetHeadless: unavailable,
             listApps: unavailable,
+            shutdownTarget: unavailable,
           },
         },
         operations: networkFact.available ? { networkDump } : {},

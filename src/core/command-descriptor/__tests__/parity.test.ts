@@ -59,6 +59,7 @@ const NO_CAPABILITY_PUBLIC_COMMANDS = new Set<string>([
   PUBLIC_COMMANDS.prepare,
   PUBLIC_COMMANDS.record,
   PUBLIC_COMMANDS.replay,
+  PUBLIC_COMMANDS.shutdown,
   PUBLIC_COMMANDS.test,
   PUBLIC_COMMANDS.trace,
 ]);

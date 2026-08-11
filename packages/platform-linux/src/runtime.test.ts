@@ -27,4 +27,8 @@ test('classifies the Linux runtime denominator as unavailable', async () => {
   expect(binding.facts.operations.bootTarget).toMatchObject({ available: false });
   expect(binding.facts.operations.bootTargetHeadless).toMatchObject({ available: false });
   expect(binding.facts.operations.listApps).toMatchObject({ available: false });
+  expect(binding.facts.operations.shutdownTarget).toMatchObject({
+    available: false,
+    reason: 'unsupported-platform-leaf',
+  });
 });

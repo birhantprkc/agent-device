@@ -20,6 +20,7 @@ export type UnavailablePlatformRuntimeFacts = Readonly<{
   network: RuntimeOperationUnavailability;
   screenRecording?: RuntimeOperationUnavailability;
   readiness?: RuntimeOperationUnavailability;
+  shutdown?: RuntimeOperationUnavailability;
 }>;
 
 type FrozenUnavailablePlatformRuntimeFacts = Readonly<{
@@ -29,6 +30,7 @@ type FrozenUnavailablePlatformRuntimeFacts = Readonly<{
   network: RuntimeOperationUnavailability;
   screenRecording: RuntimeOperationUnavailability;
   readiness: RuntimeOperationUnavailability;
+  shutdown: RuntimeOperationUnavailability;
 }>;
 
 /** Builds one honest combined owner for a family with no platform operations. */
@@ -81,7 +83,7 @@ export function createUnavailablePlatformRuntimeFacts(
   owner: RuntimeOwnerRef,
   unavailable: UnavailablePlatformRuntimeFacts,
 ): RuntimeFacts<PlatformRuntimeOperations> {
-  const { appLog, apps, appState, network, screenRecording, readiness } =
+  const { appLog, apps, appState, network, screenRecording, readiness, shutdown } =
     freezeUnavailableFacts(unavailable);
   return Object.freeze({
     device: {
@@ -103,6 +105,7 @@ export function createUnavailablePlatformRuntimeFacts(
       ensureReady: readiness,
       bootTarget: readiness,
       bootTargetHeadless: readiness,
+      shutdownTarget: shutdown,
     },
   });
 }
@@ -119,5 +122,6 @@ function freezeUnavailableFacts(
       ...(unavailable.screenRecording ?? unavailable.network),
     }),
     readiness: Object.freeze({ ...(unavailable.readiness ?? unavailable.network) }),
+    shutdown: Object.freeze({ ...(unavailable.shutdown ?? unavailable.network) }),
   });
 }

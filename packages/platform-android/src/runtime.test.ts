@@ -24,6 +24,12 @@ test.each([
   ['unknown', unknownKindDevice],
 ])('classifies the Android %s runtime denominator', async (_name, runtimeDevice) => {
   const listApps = vi.fn(async () => [{ id: 'com.example.app', name: 'Example' }]);
+  const shutdownTarget = vi.fn(async () => ({
+    success: true,
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+  }));
   const appState = vi.fn(async () => ({
     stdout: 'mCurrentFocus=Window{1 u0 com.example.app/.MainActivity}',
   }));
@@ -48,6 +54,10 @@ test.each([
       applePhysical: { ensureConnected: async () => {} },
       appleAutomation: { keepHot: () => {} },
       androidEmulator: { discover: async () => [], launch: () => 1, terminate: async () => {} },
+    },
+    deviceShutdown: {
+      apple: { shutdownTarget },
+      android: { shutdownTarget },
     },
     screenRecording: {
       android: {
@@ -88,6 +98,10 @@ test.each([
   expect(facts.operations.ensureReady).toEqual({ available: true });
   expect(facts.operations.bootTarget).toEqual({ available: true });
   expect(facts.operations.bootTargetHeadless.available).toBe(runtimeDevice.kind === 'emulator');
+  expect(facts.operations.shutdownTarget.available).toBe(runtimeDevice.kind === 'emulator');
+  if (runtimeDevice.kind === 'device') {
+    expect(facts.operations.shutdownTarget).toMatchObject({ reason: 'unsupported-device-kind' });
+  }
 
   await expect(binding.operations.ensureReady?.({})).resolves.toMatchObject({
     id: runtimeDevice.id,
@@ -119,6 +133,14 @@ test.each([
     });
   } else {
     expect(binding.operations.bootTargetHeadless).toBeUndefined();
+  }
+
+  if (runtimeDevice.kind === 'emulator') {
+    await expect(binding.operations.shutdownTarget?.()).resolves.toMatchObject({ success: true });
+    expect(shutdownTarget).toHaveBeenCalledOnce();
+    expect(shutdownTarget).toHaveBeenCalledWith(runtimeDevice, expect.any(AbortSignal));
+  } else {
+    expect(binding.operations.shutdownTarget).toBeUndefined();
   }
 });
 

@@ -204,6 +204,11 @@
         "DEFAULT_DRAG_MOVE_MS",
         "DEFAULT_DRAG_SOURCE_HOLD_MS"
       ]
+    },
+    {
+      "comment": "ADR 0019 §9: the neutral runtime-use factory is an intentional published contracts façade export; runtime plan modules consume the source declaration directly, while external command units may derive their own narrowed uses from this stable factory.",
+      "file": "packages/contracts/src/facades/platform.ts",
+      "exports": ["defineUse"]
     }
   ],
   "usedClassMembers": ["name", "listActiveLeases", "delete", "values", "elapsedMs", "isExpired"],

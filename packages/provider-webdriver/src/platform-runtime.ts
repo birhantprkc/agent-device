@@ -134,6 +134,11 @@ function webDriverFacts(
       bootTarget: available,
       bootTargetHeadless: headlessUnavailable,
       listApps: appsUnavailable,
+      shutdownTarget: {
+        available: false,
+        reason: 'unsupported-provider-mode',
+        hint: 'WebDriver owns the target lifecycle for provider-owned devices.',
+      },
     },
   });
 }

@@ -41,6 +41,10 @@ test('preserves a narrow web provider dump including empty successful entries', 
   expect(binding.facts.operations.bootTarget).toMatchObject({ available: false });
   expect(binding.facts.operations.bootTargetHeadless).toMatchObject({ available: false });
   expect(binding.facts.operations.listApps).toMatchObject({ available: false });
+  expect(binding.facts.operations.shutdownTarget).toMatchObject({
+    available: false,
+    reason: 'unsupported-platform-leaf',
+  });
 });
 
 test('keeps a web transport without dumpNetwork unavailable instead of throwing a stub', async () => {
@@ -180,6 +184,14 @@ function host(
       applePhysical: { ensureConnected: async () => {} },
       appleAutomation: { keepHot: () => {} },
       androidEmulator: { discover: async () => [], launch: () => 1, terminate: async () => {} },
+    },
+    deviceShutdown: {
+      apple: {
+        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+      },
+      android: {
+        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+      },
     },
     screenRecording: {
       outputs: { prepare: async () => {} },

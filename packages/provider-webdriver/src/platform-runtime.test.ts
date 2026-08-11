@@ -119,6 +119,14 @@ function host(run: PlatformRuntimeHost['commands']['run']): PlatformRuntimeHost 
       android: { run: async () => ({ stdout: '' }) },
       harmonyos: { run: async () => ({ stdout: '' }) },
     },
+    deviceShutdown: {
+      apple: {
+        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+      },
+      android: {
+        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+      },
+    },
     appleTools: {
       isXcrunAvailable: async () => false,
       run: async () => ({ stdout: '', stderr: '', exitCode: 0 }),

@@ -12,6 +12,10 @@ import type {
   DeviceReadinessRuntimeOperations,
 } from './device-readiness-runtime.ts';
 import type {
+  DeviceShutdownRuntimeHost,
+  DeviceShutdownRuntimeOperations,
+} from './device-shutdown-runtime.ts';
+import type {
   DeviceRuntimeOwner,
   RuntimeOwnerRef,
   RuntimePlatformModule,
@@ -23,7 +27,8 @@ export type PlatformRuntimeOperations = AppLogRuntimeOperations &
   AppStateRuntimeOperations &
   NetworkRuntimeOperations &
   ScreenRecordingRuntimeOperations &
-  DeviceReadinessRuntimeOperations;
+  DeviceReadinessRuntimeOperations &
+  DeviceShutdownRuntimeOperations;
 
 /**
  * The one neutral runtime-use declaration every command domain shares (ADR 0019 §9): no
@@ -74,6 +79,8 @@ export function resolveDeviceReadinessRuntimePlan(
 export const appStateUse = defineUse({ required: ['ensureReady', 'appState'] });
 export const appStateRuntimeUses = Object.freeze([appStateUse] as const);
 
+export const shutdownTargetUse = defineUse({ required: ['shutdownTarget'] });
+
 export type PlatformRuntimeHost = AppLogRuntimeHost &
   NetworkRuntimeHost &
   Readonly<{
@@ -81,6 +88,7 @@ export type PlatformRuntimeHost = AppLogRuntimeHost &
     appState: AppStateRuntimeHost;
     screenRecording: ScreenRecordingRuntimeHost;
     deviceReadiness: DeviceReadinessRuntimeHost;
+    deviceShutdown: DeviceShutdownRuntimeHost;
   }>;
 
 export type PlatformRuntimeOwner = DeviceRuntimeOwner<PlatformRuntimeOperations>;

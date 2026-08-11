@@ -222,6 +222,7 @@ async function capabilitiesInventoryResponse(params: {
         isCapabilityCommandAvailable(command, device, {
           apps: hasRuntimeOperation(facts, 'listApps'),
           appstate: sessionOwnedAppStateAvailable || hasRuntimeOperation(facts, 'appState'),
+          shutdown: facts?.operations.shutdownTarget.available === true,
           logs: logsAvailable,
           network: networkAvailable,
           record: recordingAvailable,
@@ -234,6 +235,7 @@ async function capabilitiesInventoryResponse(params: {
 type CapabilityAvailability = Readonly<{
   apps: boolean;
   appstate: boolean;
+  shutdown: boolean;
   logs: boolean;
   network: boolean;
   record: boolean;
@@ -291,6 +293,8 @@ function isCapabilityCommandAvailable(
       return availability.apps;
     case 'appstate':
       return availability.appstate;
+    case 'shutdown':
+      return availability.shutdown;
     default:
       return isCommandSupportedOnDevice(command, device);
   }

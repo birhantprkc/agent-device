@@ -35,7 +35,7 @@ export type BootCommandResult = {
  * return EXACTLY (src/daemon/handlers/session-state.ts) — the fixed object
  * literal `{ platform, target, device, id, kind, shutdown }` plus the additive
  * `appleOs` discriminant (Apple devices only). The `shutdown` field is the raw
- * {@link TargetShutdownResult} from `shutdownDeviceTarget`.
+ * {@link TargetShutdownResult} returned by the bound `shutdownTarget` operation.
  */
 export type ShutdownCommandResult = {
   platform: PublicPlatform;

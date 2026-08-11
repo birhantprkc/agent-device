@@ -12,5 +12,6 @@ export function createVegaPlatformRuntime(): PlatformRuntimeOwner {
   return createUnavailablePlatformRuntimeOwner('vega', {
     appLog: unavailable,
     network: unavailable,
+    shutdown: unavailable,
   });
 }

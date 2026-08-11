@@ -26,6 +26,11 @@ const appStateUnavailable = Object.freeze({
   reason: 'unsupported-device-kind',
   hint: 'Android appstate is supported only for Android emulators and devices.',
 } as const);
+const shutdownKindUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'shutdown is supported only for Apple simulators and Android emulators.',
+} as const);
 
 export function createAndroidPlatformRuntime(host: PlatformRuntimeHost): PlatformRuntimeOwner {
   const appLogs = createAndroidAppLogRuntime(host);
@@ -44,6 +49,7 @@ export function createAndroidPlatformRuntime(host: PlatformRuntimeHost): Platfor
         bootTarget: available,
         bootTargetHeadless: device.kind === 'emulator' ? available : headlessUnavailable,
         listApps: available,
+        shutdownTarget: device.kind === 'emulator' ? available : shutdownKindUnavailable,
       },
     });
   };
@@ -110,6 +116,15 @@ export function createAndroidPlatformRuntime(host: PlatformRuntimeHost): Platfor
               input.filter,
               request.scope.signal,
             ),
+          ...(facts.operations.shutdownTarget.available
+            ? {
+                shutdownTarget: async () =>
+                  await host.deviceShutdown.android.shutdownTarget(
+                    request.device,
+                    request.scope.signal,
+                  ),
+              }
+            : {}),
         }),
         [Symbol.asyncDispose]: async () => await logs[Symbol.asyncDispose](),
       }) satisfies DeviceBinding<PlatformRuntimeOperations>;

@@ -354,6 +354,7 @@ function makeGateway(
           bootTarget: { available: true as const },
           bootTargetHeadless: unavailableRecording,
           listApps: unavailableRecording,
+          shutdownTarget: unavailableRecording,
         },
       },
       operations,

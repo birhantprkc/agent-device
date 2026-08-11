@@ -296,7 +296,7 @@ const deviceHeaderProperties: Record<string, JsonSchema> = {
 };
 const deviceHeaderRequired = ['platform', 'target', 'device', 'id', 'kind'] as const;
 
-// TargetShutdownResult (src/target-shutdown-contract.ts).
+// TargetShutdownResult (packages/contracts/src/target-shutdown-contract.ts).
 const targetShutdownResultSchema: JsonSchema = objectSchema(
   {
     success: booleanSchema(),

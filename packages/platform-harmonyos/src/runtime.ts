@@ -43,6 +43,7 @@ export function createHarmonyPlatformRuntime(host: PlatformRuntimeHost): Platfor
         bootTarget: unavailable,
         bootTargetHeadless: unavailable,
         listApps: available,
+        shutdownTarget: unavailable,
       },
     });
   };

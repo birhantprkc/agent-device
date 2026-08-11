@@ -6,7 +6,7 @@ import type {
   PlatformRuntimeOwner,
 } from '@agent-device/contracts/platform';
 import { localRuntimeOwner } from '@agent-device/contracts/platform';
-import { isMacOs, type DeviceInfo } from '@agent-device/kernel/device';
+import { isIosFamily, isMacOs, type DeviceInfo } from '@agent-device/kernel/device';
 import { createAppleAppLogRuntime } from './logs/runtime.ts';
 import { dumpAppleNetworkTraffic } from './network/runtime.ts';
 import {
@@ -31,6 +31,16 @@ const headlessUnavailable = Object.freeze({
   reason: 'unsupported-provider-mode',
   hint: 'Headless boot is supported only for local Android emulators.',
 } as const);
+const shutdownKindUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'shutdown is supported only for Apple simulators and Android emulators.',
+} as const);
+
+function shutdownFact(device: DeviceInfo) {
+  if (!isIosFamily(device)) return unavailable;
+  return device.kind === 'simulator' ? available : shutdownKindUnavailable;
+}
 
 function appInventoryFacts(device: DeviceInfo) {
   if (device.appleOs === 'watchos') {
@@ -82,6 +92,7 @@ export function createApplePlatformRuntime(host: PlatformRuntimeHost): PlatformR
         bootTarget: boot,
         bootTargetHeadless: headlessUnavailable,
         listApps: apps,
+        shutdownTarget: shutdownFact(device),
       },
     });
   };
@@ -127,6 +138,19 @@ export function createApplePlatformRuntime(host: PlatformRuntimeHost): PlatformR
                   await host.appInventory.apple.listApps(
                     input.device,
                     input.filter,
+                    request.scope.signal,
+                  ),
+              }
+            : {}),
+          ...(facts.operations.shutdownTarget.available
+            ? {
+                shutdownTarget: async () =>
+                  await host.deviceShutdown.apple.shutdownTarget(
+                    request.device,
+                    request.scope.signal,
+                  ),
+              }
+            : {}),
                     request.scope.signal,
                   ),
               }

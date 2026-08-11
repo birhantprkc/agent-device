@@ -26,74 +26,92 @@ const leaves = {
 } satisfies Record<AppleOS, DeviceInfo>;
 
 test.each([
-  ['iOS simulator', leaves.ios, true, undefined],
+  ['iOS simulator', leaves.ios, true, undefined, true, undefined],
   [
     'iOS physical CoreDevice',
     appleDevice({ kind: 'device', iosPhysicalDeviceBackend: 'coredevice' }),
     true,
     undefined,
+    false,
+    'unsupported-device-kind',
   ],
   [
     'iOS physical XCTest',
     appleDevice({ kind: 'device', iosPhysicalDeviceBackend: 'xctest' }),
     false,
     'CoreDevice-backed physical iOS device',
+    false,
+    'unsupported-device-kind',
   ],
-  ['iPadOS simulator', leaves.ipados, true, undefined],
-  ['tvOS simulator', leaves.tvos, true, undefined],
-  ['macOS host', leaves.macos, true, undefined],
-  ['visionOS simulator', leaves.visionos, true, undefined],
-  ['watchOS sentinel', leaves.watchos, false, 'watchOS app logs are not supported'],
-])('classifies the %s leaf explicitly', async (_name, device, available, hint) => {
-  const binding = await createApplePlatformRuntime(platformRuntimeHostFixture()).bind({
-    device,
-    intent: { kind: 'ordinary' },
-    scope: {
-      signal: new AbortController().signal,
-      diagnostics: { emit: () => {} },
-      progress: { report: () => {} },
-    },
-  });
-  const { facts } = binding;
+  ['iPadOS simulator', leaves.ipados, true, undefined, true, undefined],
+  ['tvOS simulator', leaves.tvos, true, undefined, true, undefined],
+  ['macOS host', leaves.macos, true, undefined, false, 'unsupported-platform-leaf'],
+  ['visionOS simulator', leaves.visionos, true, undefined, true, undefined],
+  [
+    'watchOS sentinel',
+    leaves.watchos,
+    false,
+    'watchOS app logs are not supported',
+    true,
+    undefined,
+  ],
+])(
+  'classifies the %s leaf explicitly',
+  async (_name, device, available, hint, shutdownAvailable, shutdownReason) => {
+    const binding = await createApplePlatformRuntime(platformRuntimeHostFixture()).bind({
+      device,
+      intent: { kind: 'ordinary' },
+      scope: {
+        signal: new AbortController().signal,
+        diagnostics: { emit: () => {} },
+        progress: { report: () => {} },
+      },
+    });
+    const { facts } = binding;
   expect(facts.device.providerMode).toBe('local');
-  expect(facts.operations.appState).toEqual({
-    available: false,
-    reason: 'unsupported-platform-leaf',
-    hint: expect.stringContaining('session state'),
-  });
-  expect(binding.operations.appState).toBeUndefined();
-  expect(facts.operations.networkDump).toEqual({ available: true });
-  expect(facts.operations.listApps.available).toBe(
-    device.appleOs !== 'watchos' && device.iosPhysicalDeviceBackend !== 'xctest',
-  );
-  for (const operation of ['appLogInspect', 'appLogDoctor', 'appLogStart'] as const) {
-    const fact = facts.operations[operation];
-    expect(fact.available).toBe(available);
-    if (!available && hint) expect(fact).toHaveProperty('hint', expect.stringContaining(hint));
-  }
-  for (const operation of [
-    'screenRecordingStart',
-    'screenRecordingReattach',
-    'screenRecordingCleanup',
-  ] as const) {
-    expect(facts.operations[operation].available).toBe(available);
-  }
-  if (device.iosPhysicalDeviceBackend === 'xctest') {
-    expect(facts.operations.screenRecordingStart).toMatchObject({
-      hint: expect.stringContaining('CoreDevice-backed physical iOS device'),
+    expect(facts.operations.appState).toEqual({
+      available: false,
+      reason: 'unsupported-platform-leaf',
+      hint: expect.stringContaining('session state'),
     });
-  }
-  if (device.appleOs === 'watchos') {
-    expect(facts.operations.screenRecordingStart).toMatchObject({
-      hint: 'watchOS recording is not supported.',
-    });
-  }
-  expect(facts.operations.ensureReady.available).toBe(device.appleOs !== 'watchos');
-  expect(facts.operations.bootTarget.available).toBe(
-    device.appleOs !== 'macos' && device.appleOs !== 'watchos',
-  );
-  expect(facts.operations.bootTargetHeadless.available).toBe(false);
-});
+    expect(binding.operations.appState).toBeUndefined();
+    expect(facts.operations.networkDump).toEqual({ available: true });
+    expect(facts.operations.listApps.available).toBe(
+      device.appleOs !== 'watchos' && device.iosPhysicalDeviceBackend !== 'xctest',
+    );
+    for (const operation of ['appLogInspect', 'appLogDoctor', 'appLogStart'] as const) {
+      const fact = facts.operations[operation];
+      expect(fact.available).toBe(available);
+      if (!available && hint) expect(fact).toHaveProperty('hint', expect.stringContaining(hint));
+    }
+    for (const operation of [
+      'screenRecordingStart',
+      'screenRecordingReattach',
+      'screenRecordingCleanup',
+    ] as const) {
+      expect(facts.operations[operation].available).toBe(available);
+    }
+    if (device.iosPhysicalDeviceBackend === 'xctest') {
+      expect(facts.operations.screenRecordingStart).toMatchObject({
+        hint: expect.stringContaining('CoreDevice-backed physical iOS device'),
+      });
+    }
+    if (device.appleOs === 'watchos') {
+      expect(facts.operations.screenRecordingStart).toMatchObject({
+        hint: 'watchOS recording is not supported.',
+      });
+    }
+    expect(facts.operations.ensureReady.available).toBe(device.appleOs !== 'watchos');
+    expect(facts.operations.bootTarget.available).toBe(
+      device.appleOs !== 'macos' && device.appleOs !== 'watchos',
+    );
+    expect(facts.operations.bootTargetHeadless.available).toBe(false);
+    expect(facts.operations.shutdownTarget.available).toBe(shutdownAvailable);
+    if (shutdownReason) {
+      expect(facts.operations.shutdownTarget).toMatchObject({ reason: shutdownReason });
+    }
+  },
+);
 
 test('readiness and boot keep the Apple automation helper warm inside the platform runtime', async () => {
   const host = platformRuntimeHostFixture();

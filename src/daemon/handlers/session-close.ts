@@ -9,11 +9,8 @@ import type { DaemonRequest, DaemonResponse, SessionState } from '../types.ts';
 import { SessionStore } from '../session-store.ts';
 import { clearRuntimeHintsFromApp, hasRuntimeTransportHints } from '../runtime-hints.ts';
 import { cleanupRetainedMaterializedPathsForSession } from '../materialized-path-registry.ts';
-import {
-  canShutdownDeviceTarget,
-  shutdownDeviceTarget,
-  type DeviceTargetShutdownResult,
-} from '../target-shutdown.ts';
+import { canShutdownSessionTarget, shutdownSessionTarget } from '../session-close-shutdown.ts';
+import type { LeaseLifecycleProvider, TargetShutdownResult } from '@agent-device/contracts/device';
 import { successText, withSuccessText } from '../../utils/success-text.ts';
 import {
   IOS_SIMULATOR_POST_CLOSE_SETTLE_MS,
@@ -25,7 +22,6 @@ import { errorResponse } from './response.ts';
 import { expireRefFrame } from '../ref-frame.ts';
 import type { LeaseRegistry } from '../lease-registry.ts';
 import { releaseSessionLease } from '../lease-lifecycle.ts';
-import type { LeaseLifecycleProvider } from '@agent-device/contracts/device';
 import {
   hasRepairPlatformCloseReceipt,
   isRepairArmedSession,
@@ -54,12 +50,12 @@ import {
 async function maybeShutdownSessionTarget(params: {
   device: DeviceInfo;
   shutdownRequested: boolean | undefined;
-}): Promise<DeviceTargetShutdownResult | undefined> {
+}): Promise<TargetShutdownResult | undefined> {
   const { device, shutdownRequested } = params;
   if (!shutdownRequested) return undefined;
   if (isActiveProviderDevice(device)) return undefined;
-  if (!canShutdownDeviceTarget(device)) return undefined;
-  return await shutdownDeviceTarget(device);
+  if (!canShutdownSessionTarget(device)) return undefined;
+  return await shutdownSessionTarget(device);
 }
 
 function shouldRetainAppleRunnerAfterClose(req: DaemonRequest, session: SessionState): boolean {
@@ -443,7 +439,7 @@ function buildCloseSuccessResponse(params: {
   session: SessionState;
   repair: Extract<RepairClosePreparation, { repairArmed: boolean }>;
   requestedSaveScript: boolean;
-  shutdownResult: DeviceTargetShutdownResult | undefined;
+  shutdownResult: TargetShutdownResult | undefined;
   providerData: Record<string, unknown> | undefined;
 }): DaemonResponse {
   const { session, repair, requestedSaveScript, shutdownResult, providerData } = params;

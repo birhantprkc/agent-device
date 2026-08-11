@@ -32,6 +32,14 @@ export function platformRuntimeHostFixture(): PlatformRuntimeHost {
         terminate: async () => {},
       },
     },
+    deviceShutdown: {
+      apple: {
+        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+      },
+      android: {
+        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+      },
+    },
     screenRecording: {
       apple: {
         availability: async () => ({ available: true }),

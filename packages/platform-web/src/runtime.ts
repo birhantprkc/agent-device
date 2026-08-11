@@ -34,6 +34,10 @@ const appStateUnavailable = Object.freeze({
   available: false,
   reason: 'unsupported-platform-leaf',
 } as const);
+const shutdownUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-platform-leaf',
+} as const);
 
 export function createWebPlatformRuntime(host: PlatformRuntimeHost): PlatformRuntimeOwner {
   const inspectFacts = async (device: DeviceInfo) => {
@@ -142,6 +146,7 @@ function webRuntimeFacts(
       bootTarget: readinessUnavailable,
       bootTargetHeadless: readinessUnavailable,
       listApps: appsUnavailable,
+      shutdownTarget: shutdownUnavailable,
     },
   });
 }

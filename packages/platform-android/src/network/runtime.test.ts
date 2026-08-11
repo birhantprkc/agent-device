@@ -209,6 +209,14 @@ function unusedAppLogHost(): Omit<
       appleAutomation: { keepHot: () => {} },
       androidEmulator: { discover: async () => [], launch: () => 1, terminate: async () => {} },
     },
+    deviceShutdown: {
+      apple: {
+        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+      },
+      android: {
+        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+      },
+    },
     screenRecording: {
       outputs: { prepare: async () => {} },
       apple: {
