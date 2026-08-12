@@ -257,8 +257,7 @@ function isCapabilityCommandAvailable(
     [PUBLIC_COMMANDS.apps]: availability.appsAvailable,
     [PUBLIC_COMMANDS.appState]:
       availability.sessionOwnedAppStateAvailable || isAppStateRuntimeAvailable(availability.facts),
-    [PUBLIC_COMMANDS.shutdown]:
-      availability.facts?.operations.shutdownTarget?.available === true,
+    [PUBLIC_COMMANDS.shutdown]: availability.facts?.operations.shutdownTarget?.available === true,
   };
   return (
     projectedAvailability[command] ??
