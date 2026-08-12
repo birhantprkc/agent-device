@@ -1,24 +1,15 @@
 import { expect, test, vi } from 'vitest';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 
-const {
-  invalidateIosAppResolutionCache,
-  installIosInstallablePath,
-  pushIosNotification,
-  uninstallIosApp,
-} = vi.hoisted(() => ({
+const { invalidateIosAppResolutionCache, resolveIosApp } = vi.hoisted(() => ({
   invalidateIosAppResolutionCache: vi.fn(),
-  installIosInstallablePath: vi.fn(),
-  pushIosNotification: vi.fn(),
-  uninstallIosApp: vi.fn(),
+  resolveIosApp: vi.fn(),
 }));
 
-vi.mock('./platforms/apple/core/app-install.ts', () => ({
-  installIosInstallablePath,
-  uninstallIosApp,
+vi.mock('./platforms/apple/core/app-resolution.ts', () => ({
+  invalidateIosAppResolutionCache,
+  resolveIosApp,
 }));
-vi.mock('./platforms/apple/core/app-device-io.ts', () => ({ pushIosNotification }));
-vi.mock('./platforms/apple/core/app-resolution.ts', () => ({ invalidateIosAppResolutionCache }));
 
 import { createAppleAppDeploymentExecutor } from './platform-runtime-apple-deployment-executor.ts';
 
@@ -32,20 +23,16 @@ const device: DeviceInfo = {
   booted: true,
 };
 
-test('forwards the binding signal to every Apple deployment side effect', async () => {
-  installIosInstallablePath.mockResolvedValue(undefined);
-  uninstallIosApp.mockResolvedValue({ bundleId: 'com.example.app' });
-  pushIosNotification.mockResolvedValue(undefined);
-  const signal = new AbortController().signal;
+test('keeps only artifact and identity capabilities in the root adapter', async () => {
+  resolveIosApp.mockResolvedValue('com.example.app');
   const executor = createAppleAppDeploymentExecutor();
 
-  await executor.install(device, '/tmp/App.app', signal);
-  await executor.uninstall(device, 'Example', signal);
-  await executor.push(device, { appId: 'com.example.app', payload: {} }, signal);
+  await expect(executor.resolveAppBundleId(device, 'Example')).resolves.toBe('com.example.app');
 
-  expect(installIosInstallablePath).toHaveBeenCalledWith(device, '/tmp/App.app', { signal });
-  expect(uninstallIosApp).toHaveBeenCalledWith(device, 'Example', { signal });
-  expect(pushIosNotification).toHaveBeenCalledWith(device, 'com.example.app', {}, { signal });
+  expect(resolveIosApp).toHaveBeenCalledWith(device, 'Example');
+  expect(executor).not.toHaveProperty('install');
+  expect(executor).not.toHaveProperty('uninstall');
+  expect(executor).not.toHaveProperty('push');
 });
 
 test('delegates the full Apple reinstall cache transaction to the lazy native executor', async () => {

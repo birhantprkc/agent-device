@@ -117,7 +117,7 @@ export function createApplePlatformRuntime(host: PlatformRuntimeHost): PlatformR
         operations: Object.freeze({
           ...logs.operations,
           ...createAppleAppDeploymentOperations({
-            executor: host.appleDeployment,
+            host,
             device: request.device,
             signal: request.scope.signal,
           }),

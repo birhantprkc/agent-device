@@ -2,13 +2,19 @@ import type {
   AppDeploymentInput,
   AppDeploymentResult,
   AppDeploymentRuntimeOperations,
-  AppleAppDeploymentExecutor,
+  PlatformRuntimeHost,
   DeployMaterializedAppInput,
   MaterializeAppSourceInput,
   PushNotificationInput,
   RuntimeOperationFact,
 } from '@agent-device/contracts/platform';
 import { isIosFamily, type DeviceInfo } from '@agent-device/kernel/device';
+import { AppError } from '@agent-device/kernel/errors';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { ensureAppleReady } from '../readiness/runtime.ts';
+import { simctlArgs } from '../simulator-state.ts';
 
 const available = Object.freeze({ available: true } as const);
 const coreDeviceRequired = Object.freeze({
@@ -46,27 +52,27 @@ export function appleAppDeploymentFacts(device: DeviceInfo): Readonly<{
 }
 
 export function createAppleAppDeploymentOperations(params: {
-  executor: AppleAppDeploymentExecutor;
+  host: PlatformRuntimeHost;
   device: DeviceInfo;
   signal: AbortSignal;
 }): Partial<AppDeploymentRuntimeOperations> {
-  const { executor, device, signal } = params;
+  const { host, device, signal } = params;
   const facts = appleAppDeploymentFacts(device);
   return Object.freeze({
     ...(facts.deployApp.available
       ? {
           deployApp: async (input: AppDeploymentInput) =>
-            await deployAppleApp(executor, device, input, signal),
+            await deployAppleApp(host, device, input, signal),
           materializeAppSource: async (input: MaterializeAppSourceInput) =>
-            await executor.prepareArtifact(input, { signal }),
+            await host.appleDeployment.prepareArtifact(input, { signal }),
           deployMaterializedApp: async (input: DeployMaterializedAppInput) =>
-            await deployPreparedAppleApp(executor, device, input, signal),
+            await deployPreparedAppleApp(host, device, input, signal),
         }
       : {}),
     ...(facts.sendPushNotification.available
       ? {
           sendPushNotification: async (input: PushNotificationInput) => {
-            await executor.push(device, input, signal);
+            await pushAppleNotification(host, device, input, signal);
             return {};
           },
         }
@@ -75,7 +81,7 @@ export function createAppleAppDeploymentOperations(params: {
 }
 
 async function deployAppleApp(
-  executor: AppleAppDeploymentExecutor,
+  host: PlatformRuntimeHost,
   device: DeviceInfo,
   input: AppDeploymentInput,
   signal: AbortSignal,
@@ -84,14 +90,15 @@ async function deployAppleApp(
   // removed the selected app before it materialized the replacement artifact. That ordering is
   // observable when artifact preparation fails, so it belongs to the platform deployment facet.
   if (input.replaceExisting) {
-    return await executor.withInvalidatedAppResolutionCache(device, async () => {
-      const { bundleId } = await executor.uninstall(device, input.app, signal);
-      const artifact = await executor.prepareArtifact(
+    return await host.appleDeployment.withInvalidatedAppResolutionCache(device, async () => {
+      const bundleId = await host.appleDeployment.resolveAppBundleId(device, input.app);
+      await uninstallAppleApp(host, device, bundleId, signal);
+      const artifact = await host.appleDeployment.prepareArtifact(
         { source: { kind: 'path', path: input.appPath } },
         { appIdentifierHint: input.app, signal },
       );
       try {
-        await executor.install(device, artifact.installablePath, signal);
+        await installAppleApp(host, device, artifact.installablePath, signal);
         return { bundleId, launchTarget: bundleId };
       } finally {
         await artifact.cleanup();
@@ -99,29 +106,122 @@ async function deployAppleApp(
     });
   }
 
-  const artifact = await executor.prepareArtifact(
+  const artifact = await host.appleDeployment.prepareArtifact(
     { source: { kind: 'path', path: input.appPath } },
     { appIdentifierHint: input.app, signal },
   );
   try {
-    return await deployPreparedAppleApp(executor, device, { artifact }, signal);
+    return await deployPreparedAppleApp(host, device, { artifact }, signal);
   } finally {
     await artifact.cleanup();
   }
 }
 
 async function deployPreparedAppleApp(
-  executor: AppleAppDeploymentExecutor,
+  host: PlatformRuntimeHost,
   device: DeviceInfo,
   input: DeployMaterializedAppInput,
   signal: AbortSignal,
 ): Promise<AppDeploymentResult> {
-  await executor.install(device, input.artifact.installablePath, signal);
+  await installAppleApp(host, device, input.artifact.installablePath, signal);
   return {
     ...(input.artifact.bundleId ? { bundleId: input.artifact.bundleId } : {}),
     ...(input.artifact.appName ? { appName: input.artifact.appName } : {}),
     ...(input.artifact.bundleId ? { launchTarget: input.artifact.bundleId } : {}),
   };
+}
+
+async function installAppleApp(
+  host: PlatformRuntimeHost,
+  device: DeviceInfo,
+  installablePath: string,
+  signal: AbortSignal,
+): Promise<void> {
+  await ensureAppleReady(host, device, signal);
+  const result = await host.appleTools.run(
+    device.kind === 'simulator'
+      ? { tool: 'simctl', args: simctlArgs(device, ['install', device.id, installablePath]) }
+      : {
+          tool: 'devicectl',
+          args: ['device', 'install', 'app', '--device', device.id, installablePath],
+          timeoutMs: 120_000,
+        },
+    signal,
+  );
+  assertAppleToolSuccess(result, 'Apple app install failed');
+}
+
+async function uninstallAppleApp(
+  host: PlatformRuntimeHost,
+  device: DeviceInfo,
+  bundleId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  await ensureAppleReady(host, device, signal);
+  const result = await host.appleTools.run(
+    device.kind === 'simulator'
+      ? {
+          tool: 'simctl',
+          args: simctlArgs(device, ['uninstall', device.id, bundleId]),
+          allowFailure: true,
+        }
+      : {
+          tool: 'devicectl',
+          args: ['device', 'uninstall', 'app', '--device', device.id, bundleId],
+          allowFailure: true,
+        },
+    signal,
+  );
+  if (result.exitCode === 0 || isMissingAppOutput(`${result.stdout}\n${result.stderr}`)) return;
+  assertAppleToolSuccess(result, `Apple app uninstall failed for ${bundleId}`);
+}
+
+async function pushAppleNotification(
+  host: PlatformRuntimeHost,
+  device: DeviceInfo,
+  input: PushNotificationInput,
+  signal: AbortSignal,
+): Promise<void> {
+  if (device.kind !== 'simulator') {
+    throw new AppError('UNSUPPORTED_OPERATION', 'Apple push notifications require a simulator');
+  }
+  await ensureAppleReady(host, device, signal);
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-device-ios-push-'));
+  const payloadPath = path.join(tempDir, 'payload.apns');
+  try {
+    await fs.writeFile(payloadPath, `${JSON.stringify(input.payload)}\n`, 'utf8');
+    const result = await host.appleTools.run(
+      {
+        tool: 'simctl',
+        args: simctlArgs(device, ['push', device.id, input.appId, payloadPath]),
+      },
+      signal,
+    );
+    assertAppleToolSuccess(result, 'Apple push notification failed');
+  } finally {
+    await fs.rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+function isMissingAppOutput(output: string): boolean {
+  const normalized = output.toLowerCase();
+  return (
+    normalized.includes('not installed') ||
+    normalized.includes('not found') ||
+    normalized.includes('no such file')
+  );
+}
+
+function assertAppleToolSuccess(
+  result: Readonly<{ stdout: string; stderr: string; exitCode: number | null }>,
+  message: string,
+): void {
+  if (result.exitCode === 0) return;
+  throw new AppError('COMMAND_FAILED', message, {
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode,
+  });
 }
 
 function appleDeployFact(device: DeviceInfo): RuntimeOperationFact {

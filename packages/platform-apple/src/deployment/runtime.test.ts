@@ -1,5 +1,8 @@
 import { expect, test, vi } from 'vitest';
-import type { AppleAppDeploymentExecutor } from '@agent-device/contracts/platform';
+import type {
+  AppleAppDeploymentExecutor,
+  PlatformRuntimeHost,
+} from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { appleAppDeploymentFacts, createAppleAppDeploymentOperations } from './runtime.ts';
 
@@ -21,6 +24,31 @@ async function withoutInvalidatingAppResolutionCache<Result>(
   operation: () => Promise<Result>,
 ): Promise<Result> {
   return await operation();
+}
+
+function deploymentHost(
+  appleDeployment: AppleAppDeploymentExecutor,
+  run = vi.fn(async (request: { args: readonly string[] }) => ({
+    stdout: request.args.includes('list')
+      ? '{"devices":{"runtime":[{"udid":"apple-deployment-fact","state":"Booted"}]}}'
+      : '',
+    stderr: '',
+    exitCode: 0,
+  })),
+): PlatformRuntimeHost {
+  return {
+    appleDeployment,
+    appleTools: { isXcrunAvailable: async () => true, run },
+    commands: {
+      which: async () => undefined,
+      run: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
+    },
+    deviceReadiness: {
+      applePhysical: { ensureConnected: async () => {} },
+      appleAutomation: { keepHot: () => {}, markBooted: () => {} },
+      androidEmulator: { discover: async () => [], launch: () => 1, terminate: async () => {} },
+    },
+  } as unknown as PlatformRuntimeHost;
 }
 
 test.each([
@@ -161,20 +189,24 @@ test('exposes only fact-admitted Apple deployment operations', async () => {
     appName: 'Example',
     cleanup,
   }));
-  const install = vi.fn(async () => {});
-  const uninstall = vi.fn(async () => ({ bundleId: 'com.example.replaced' }));
-  const push = vi.fn(async () => {});
+  const resolveAppBundleId = vi.fn(async () => 'com.example.replaced');
   const executor = {
     prepareArtifact,
-    install,
-    uninstall,
-    push,
+    resolveAppBundleId,
     withInvalidatedAppResolutionCache: withoutInvalidatingAppResolutionCache,
   } as AppleAppDeploymentExecutor;
+  const run = vi.fn(async (request: { args: readonly string[] }) => ({
+    stdout: request.args.includes('list')
+      ? '{"devices":{"runtime":[{"udid":"apple-deployment-fact","state":"Booted"}]}}'
+      : '',
+    stderr: '',
+    exitCode: 0,
+  }));
+  const host = deploymentHost(executor, run);
   const device = appleDevice();
   const signal = new AbortController().signal;
   const operations = createAppleAppDeploymentOperations({
-    executor,
+    host,
     device,
     signal,
   });
@@ -196,13 +228,11 @@ test('exposes only fact-admitted Apple deployment operations', async () => {
   });
 
   expect(prepareArtifact).toHaveBeenCalledTimes(3);
-  expect(install).toHaveBeenCalledTimes(3);
-  expect(uninstall).toHaveBeenCalledOnce();
-  expect(push).toHaveBeenCalledOnce();
+  expect(run.mock.calls.filter(([request]) => request.args.includes('install'))).toHaveLength(3);
+  expect(run.mock.calls.filter(([request]) => request.args.includes('uninstall'))).toHaveLength(1);
+  expect(run.mock.calls.filter(([request]) => request.args.includes('push'))).toHaveLength(1);
   expect(cleanup).toHaveBeenCalledTimes(2);
-  expect(uninstall).toHaveBeenCalledWith(device, 'com.example.replaced', signal);
-  expect(install).toHaveBeenCalledWith(device, '/tmp/App.app', signal);
-  expect(push).toHaveBeenCalledWith(device, { appId: 'com.example.app', payload: {} }, signal);
+  expect(resolveAppBundleId).toHaveBeenCalledWith(device, 'com.example.replaced');
   expect(prepareArtifact).toHaveBeenNthCalledWith(
     1,
     { source: { kind: 'path', path: '/tmp/App.app' } },
@@ -215,7 +245,7 @@ test('exposes only fact-admitted Apple deployment operations', async () => {
   );
   expect(
     createAppleAppDeploymentOperations({
-      executor,
+      host,
       device: appleDevice({ appleOs: 'macos', kind: 'device', target: 'desktop' }),
       signal: new AbortController().signal,
     }),
@@ -224,26 +254,22 @@ test('exposes only fact-admitted Apple deployment operations', async () => {
 
 test('preserves Apple reinstall partial-failure ordering', async () => {
   const order: string[] = [];
-  const uninstall = vi.fn(async () => {
+  const resolveAppBundleId = vi.fn(async () => {
     order.push('uninstall');
-    return { bundleId: 'com.example.replaced' };
+    return 'com.example.replaced';
   });
   const prepareArtifact = vi.fn(async () => {
     order.push('prepare');
     throw new Error('replacement artifact is invalid');
   });
-  const install = vi.fn(async () => {
-    order.push('install');
-  });
   const executor = {
     prepareArtifact,
-    install,
-    uninstall,
-    push: async () => {},
+    resolveAppBundleId,
     withInvalidatedAppResolutionCache: withoutInvalidatingAppResolutionCache,
   } as AppleAppDeploymentExecutor;
+  const host = deploymentHost(executor);
   const operations = createAppleAppDeploymentOperations({
-    executor,
+    host,
     device: appleDevice(),
     signal: new AbortController().signal,
   });
@@ -257,7 +283,6 @@ test('preserves Apple reinstall partial-failure ordering', async () => {
   ).rejects.toThrow('replacement artifact is invalid');
 
   expect(order).toEqual(['uninstall', 'prepare']);
-  expect(install).not.toHaveBeenCalled();
 });
 
 test('clears a concurrently repopulated fuzzy resolution after a partial-failed Apple reinstall', async () => {
@@ -276,12 +301,12 @@ test('clears a concurrently repopulated fuzzy resolution after a partial-failed 
       cachedResolutions.clear();
     }
   };
-  const uninstall = vi.fn(
+  const resolveAppBundleId = vi.fn(
     async (_device: DeviceInfo, app: string) =>
       await invalidateDuringUninstall(async () => {
         const bundleId = await resolveFuzzyTarget(app);
         expect(bundleId).toBe('com.example.current');
-        return { bundleId };
+        return bundleId;
       }),
   );
   const prepareArtifact = vi.fn(async () => {
@@ -304,13 +329,11 @@ test('clears a concurrently repopulated fuzzy resolution after a partial-failed 
   );
   const executor = {
     prepareArtifact,
-    install: async () => {},
-    uninstall,
-    push: async () => {},
+    resolveAppBundleId,
     withInvalidatedAppResolutionCache,
   } as AppleAppDeploymentExecutor;
   const operations = createAppleAppDeploymentOperations({
-    executor,
+    host: deploymentHost(executor),
     device: appleDevice(),
     signal: new AbortController().signal,
   });

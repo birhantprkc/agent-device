@@ -72,13 +72,7 @@ export type AppleAppDeploymentExecutor = Readonly<{
     input: MaterializeAppSourceInput,
     options: Readonly<{ appIdentifierHint?: string; signal: AbortSignal }>,
   ): Promise<MaterializedAppSource>;
-  install(device: DeviceInfo, installablePath: string, signal: AbortSignal): Promise<void>;
-  uninstall(
-    device: DeviceInfo,
-    app: string,
-    signal: AbortSignal,
-  ): Promise<Readonly<{ bundleId: string }>>;
-  push(device: DeviceInfo, input: PushNotificationInput, signal: AbortSignal): Promise<void>;
+  resolveAppBundleId(device: DeviceInfo, app: string): Promise<string>;
 }>;
 
 /**
