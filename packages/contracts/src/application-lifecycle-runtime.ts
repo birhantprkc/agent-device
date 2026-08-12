@@ -277,7 +277,6 @@ export type AppleApplicationTools = Readonly<{
   applyRuntimeHints(device: DeviceInfo, input: RuntimeHintsApplicationInput): Promise<void>;
   clearRuntimeHints(device: DeviceInfo, input: RuntimeHintsApplicationInput): Promise<void>;
   dismissCloseAlerts(device: DeviceInfo, input: CloseApplicationFinalizationInput): Promise<void>;
-  shutdownTarget(device: DeviceInfo): Promise<TargetShutdownResult | undefined>;
   detachRunnerSessionsForShutdown(): Promise<void>;
   finalizeRunnerSessionsForShutdown(): Promise<void>;
 }>;
@@ -303,7 +302,6 @@ export type AndroidApplicationTools = Readonly<{
   ): Promise<void>;
   recoverTestImeStartup(input: Readonly<{ stateDir: string }>): Promise<void>;
   hasTestImeRecoveryEvidence(stateDir: string): Promise<boolean>;
-  shutdownTarget(device: DeviceInfo): Promise<TargetShutdownResult | undefined>;
 }>;
 
 /** Gateway-coordinated durable phases whose concrete mechanics stay package-owned. */

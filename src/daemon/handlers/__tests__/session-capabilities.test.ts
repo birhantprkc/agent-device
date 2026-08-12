@@ -10,6 +10,7 @@ import {
   makeSessionStore,
 } from '../../../__tests__/test-utils/index.ts';
 import { withTestDeviceInventoryProvider as withTargetDeviceResolutionScope } from '../../../__tests__/test-utils/device-inventory-gateways.ts';
+import { unavailableDeploymentAndShutdownOperationFacts } from '../../../__tests__/test-utils/runtime-operation-facts.ts';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import {
   applicationLifecycleOperationFacts,
@@ -579,6 +580,7 @@ function createAdmissionOperationFacts(
   lifecycleAvailable: boolean,
 ) {
   return {
+    ...unavailableDeploymentAndShutdownOperationFacts,
     appLogInspect: options.appLogAvailable ? { available: true as const } : unavailable,
     appLogDoctor: unavailable,
     appLogStart: unavailable,

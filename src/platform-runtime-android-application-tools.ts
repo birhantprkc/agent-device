@@ -71,11 +71,6 @@ export function createAndroidApplicationTools(): AndroidApplicationTools {
         await import('./platforms/android/ime-recovery-marker.ts');
       return (await readAndroidTestImeRecoveryMarkers(stateDir)).length > 0;
     },
-    shutdownTarget: async (device) => {
-      if (device.platform !== 'android' || device.kind !== 'emulator') return undefined;
-      const { shutdownDeviceTarget } = await import('./daemon/target-shutdown.ts');
-      return await shutdownDeviceTarget(device);
-    },
   });
 }
 

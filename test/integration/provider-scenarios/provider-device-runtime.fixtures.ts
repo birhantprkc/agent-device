@@ -27,6 +27,7 @@ import {
   type PlatformRuntimeProviderModule,
   type RuntimeFacts,
 } from '@agent-device/contracts/platform';
+import { unavailableDeploymentAndShutdownOperationFacts } from '../../../src/__tests__/test-utils/runtime-operation-facts.ts';
 import type { DaemonRequest } from '../../../src/daemon/types.ts';
 import { deviceShape, type DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
@@ -218,6 +219,7 @@ function providerScenarioRuntimeFacts(
       bootTarget: fakeProviderUnavailable,
       bootTargetHeadless: fakeProviderUnavailable,
       listApps: fakeProviderUnavailable,
+      ...unavailableDeploymentAndShutdownOperationFacts,
       ...applicationLifecycleOperationFacts({
         resolveOpenTarget: fakeProviderAvailable,
         prepareApplicationOpen: fakeProviderAvailable,

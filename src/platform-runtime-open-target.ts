@@ -185,7 +185,7 @@ export async function resolveAndroidPackageForOpen(
   if (device.platform !== 'android' || !openTarget || isDeepLinkTarget(openTarget))
     return undefined;
   try {
-    const { resolveAndroidApp } = await import('./platforms/android/app-lifecycle.ts');
+    const { resolveAndroidApp } = await import('./platforms/android/app-deployment-resolution.ts');
     const resolved = await resolveAndroidApp(device, openTarget);
     return resolved.type === 'package' ? resolved.value : undefined;
   } catch {

@@ -1,15 +1,11 @@
 import { dispatchCommand } from '../../core/dispatch.ts';
 import { PUBLIC_COMMANDS } from '../../command-catalog.ts';
-import { resolvePayloadInput } from '../../utils/payload-input.ts';
 import type { AndroidAdbExecutor } from '../../platforms/android/adb-executor.ts';
 import { publicPlatformString, type DeviceInfo } from '@agent-device/kernel/device';
 import type { DaemonInvokeFn, DaemonRequest, DaemonResponse, SessionState } from '../types.ts';
 import { SessionStore } from '../session-store.ts';
 import { contextFromFlags } from '../context.ts';
-import {
-  handleInstallFromSourceCommand,
-  handleReleaseMaterializedPathsCommand,
-} from './install-source.ts';
+import { handleReleaseMaterializedPathsCommand } from './session-app-source-deployment.ts';
 import { requireSessionOrExplicitSelector, resolveCommandDevice } from './session-device-utils.ts';
 import { errorResponse, requireCommandSupported } from './response.ts';
 import { recordSessionAction } from './handler-utils.ts';
@@ -21,11 +17,7 @@ import {
   resolveSessionAppBundleIdForTarget,
 } from '../../platform-runtime-open-target.ts';
 import { handleCloseCommand } from './session-close.ts';
-import {
-  defaultInstallOps,
-  defaultReinstallOps,
-  handleAppDeployCommand,
-} from './session-deploy.ts';
+import { handleSessionAppDeploymentCommand } from './session-app-deployment-route.ts';
 import { runBatchCommands } from './session-batch.ts';
 import { handleSessionInventoryCommands } from './session-inventory.ts';
 import { handleSessionStateCommands } from './session-state.ts';
@@ -285,28 +277,6 @@ async function handleKeyboardCommand(params: SessionCommandParams): Promise<Daem
   });
 }
 
-async function handlePushCommand(params: SessionCommandParams): Promise<DaemonResponse> {
-  const { req, sessionName, logPath, sessionStore } = params;
-  const appId = req.positionals?.[0]?.trim();
-  const payloadArg = req.positionals?.[1]?.trim();
-  if (!appId || !payloadArg) {
-    return errorResponse(
-      'INVALID_ARGS',
-      'push requires <bundle|package> <payload.json|inline-json>',
-    );
-  }
-
-  return await runSessionOrSelectorDispatch({
-    req,
-    sessionName,
-    logPath,
-    sessionStore,
-    command: PUBLIC_COMMANDS.push,
-    positionals: [appId, maybeResolvePushPayloadPath(payloadArg, req.meta?.cwd)],
-    recordPositionals: [appId, payloadArg],
-  });
-}
-
 async function handleTriggerAppEventCommand(params: SessionCommandParams): Promise<DaemonResponse> {
   const { req, sessionName, logPath, sessionStore } = params;
   return await runSessionOrSelectorDispatch({
@@ -395,27 +365,12 @@ const SESSION_COMMAND_HANDLER_IMPLS = {
       inspectFacts,
       bindDevice,
     }),
-  install: async ({ req, sessionName, sessionStore }) =>
-    await handleAppDeployCommand({
-      req,
-      command: 'install',
-      sessionName,
-      sessionStore,
-      deployOps: defaultInstallOps,
-    }),
-  reinstall: async ({ req, sessionName, sessionStore }) =>
-    await handleAppDeployCommand({
-      req,
-      command: 'reinstall',
-      sessionName,
-      sessionStore,
-      deployOps: defaultReinstallOps,
-    }),
-  install_source: async ({ req, sessionName, sessionStore }) =>
-    await handleInstallFromSourceCommand({ req, sessionName, sessionStore }),
+  install: handleSessionAppDeploymentCommand,
+  reinstall: handleSessionAppDeploymentCommand,
+  install_source: handleSessionAppDeploymentCommand,
   release_materialized_paths: async ({ req }) =>
     await handleReleaseMaterializedPathsCommand({ req }),
-  push: handlePushCommand,
+  push: handleSessionAppDeploymentCommand,
   'trigger-app-event': handleTriggerAppEventCommand,
   open: async ({
     req,
@@ -514,13 +469,4 @@ export async function handleSessionCommands(
     throwIfCanceled,
     reconcileOrphanedDeviceClaim,
   });
-}
-
-function maybeResolvePushPayloadPath(payloadArg: string, cwd?: string): string {
-  const resolved = resolvePayloadInput(payloadArg, {
-    subject: 'Push payload',
-    cwd,
-    expandPath: (value, currentCwd) => SessionStore.expandHome(value, currentCwd),
-  });
-  return resolved.kind === 'file' ? resolved.path : resolved.text;
 }

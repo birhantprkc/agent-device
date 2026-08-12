@@ -22,6 +22,7 @@ type AndroidLifecycleHost = Pick<
   | 'clock'
   | 'commands'
   | 'deviceReadiness'
+  | 'deviceShutdown'
   | 'localInteractors'
   | 'toolchains'
 >;
@@ -74,7 +75,7 @@ export function bindAndroidApplicationLifecycle(
         sessionName: input.sessionName,
       });
       const shutdown = input.shutdownTarget
-        ? await host.androidApplications.shutdownTarget(device)
+        ? await host.deviceShutdown.android.shutdownTarget(device, signal)
         : undefined;
       return shutdown === undefined ? {} : { shutdown };
     },

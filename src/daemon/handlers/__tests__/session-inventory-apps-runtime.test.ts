@@ -9,6 +9,7 @@ import {
   type PlatformRuntimeOperations,
   type RuntimeFacts,
 } from '@agent-device/contracts/platform';
+import { unavailableDeploymentAndShutdownOperationFacts } from '../../../__tests__/test-utils/runtime-operation-facts.ts';
 import type {
   BindDeviceRuntime,
   InspectDeviceRuntimeFacts,
@@ -51,6 +52,7 @@ function runtimeFacts(): RuntimeFacts<PlatformRuntimeOperations> {
       ensureReady: appsAvailable,
       bootTarget: unavailable,
       bootTargetHeadless: unavailable,
+      ...unavailableDeploymentAndShutdownOperationFacts,
       ...applicationLifecycleOperationFacts({
         resolveOpenTarget: unavailable,
         prepareApplicationOpen: unavailable,

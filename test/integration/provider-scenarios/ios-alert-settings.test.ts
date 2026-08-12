@@ -9,6 +9,7 @@ import {
   type PlatformRuntimeOperations,
   type RuntimeFacts,
 } from '@agent-device/contracts/platform';
+import { unavailableDeploymentAndShutdownOperationFacts } from '../../../src/__tests__/test-utils/runtime-operation-facts.ts';
 import { createAppLogStartResult, createDurableResourceEnvelope } from '@agent-device/capture-kit';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { createTestAppLogLiveHandle } from '../../../src/__tests__/test-utils/app-log-live-handle.ts';
@@ -324,6 +325,7 @@ function recordingRuntimeFacts(device: DeviceInfo): RuntimeFacts<PlatformRuntime
       bootTarget: available,
       bootTargetHeadless: unavailableRecording,
       listApps: unavailableRecording,
+      ...unavailableDeploymentAndShutdownOperationFacts,
       ...applicationLifecycleOperationFacts({
         resolveOpenTarget: available,
         prepareApplicationOpen: available,

@@ -38,6 +38,9 @@ test('preserves a runtime launch URL duration after the admitted Android follow-
     deviceReadiness: {
       android: { ensureReady: async () => ({ ...device, booted: true }) },
     },
+    deviceShutdown: {
+      android: { shutdownTarget: async () => undefined },
+    },
     androidApplications: {
       resolveOpenTarget: async () => ({}),
       inferOpenedAppBundleId: async () => 'com.example.app',
@@ -48,7 +51,6 @@ test('preserves a runtime launch URL duration after the admitted Android follow-
       restoreTestIme: async () => {},
       recoverTestImeStartup: async () => {},
       hasTestImeRecoveryEvidence: async () => false,
-      shutdownTarget: async () => undefined,
     },
   } as unknown as Pick<
     PlatformRuntimeHost,
@@ -56,6 +58,7 @@ test('preserves a runtime launch URL duration after the admitted Android follow-
     | 'clock'
     | 'commands'
     | 'deviceReadiness'
+    | 'deviceShutdown'
     | 'localInteractors'
     | 'toolchains'
   >;

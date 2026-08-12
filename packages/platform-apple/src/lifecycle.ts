@@ -25,7 +25,13 @@ const POST_OPEN_SETTLE_MS = 300;
 /** The Apple package receives only the lazy tools and readiness ports it owns. */
 type AppleLifecycleHost = Pick<
   PlatformRuntimeHost,
-  'appleApplications' | 'appleTools' | 'clock' | 'commands' | 'deviceReadiness' | 'localInteractors'
+  | 'appleApplications'
+  | 'appleTools'
+  | 'clock'
+  | 'commands'
+  | 'deviceReadiness'
+  | 'deviceShutdown'
+  | 'localInteractors'
 >;
 
 type MutableOpenTiming = {
@@ -68,7 +74,7 @@ export function bindAppleApplicationLifecycle(
       await params.host.appleApplications.clearRuntimeHints(params.device, input),
     closeApplication: async (input) => await closeAppleApplication(params.host, binding, input),
     finalizeApplicationClose: async (input) =>
-      await finalizeAppleApplicationClose(params.host, params.device, input),
+      await finalizeAppleApplicationClose(params.host, params.device, params.signal, input),
     prepareAppleRunner: async (input) =>
       await prepareAppleRunner(params.host, params.device, params.signal, input),
     configureProviderPortReverse: unavailable,
@@ -271,6 +277,7 @@ async function closeAppleApplication(
 async function finalizeAppleApplicationClose(
   host: AppleLifecycleHost,
   device: DeviceInfo,
+  signal: AbortSignal,
   input: CloseApplicationFinalizationInput,
 ) {
   if (input.daemonShutdown) {
@@ -283,7 +290,7 @@ async function finalizeAppleApplicationClose(
     await host.appleApplications.dismissCloseAlerts(device, input).catch(() => {});
   }
   const shutdown = input.shutdownTarget
-    ? await host.appleApplications.shutdownTarget(device)
+    ? await host.deviceShutdown.apple.shutdownTarget(device, signal)
     : undefined;
   return shutdown === undefined ? {} : { shutdown };
 }

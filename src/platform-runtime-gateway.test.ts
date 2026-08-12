@@ -18,6 +18,7 @@ import {
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { createLimrunRuntime, type LimrunRuntimeDependencies } from '@agent-device/provider-limrun';
 import { describe, expect, test, vi } from 'vitest';
+import { unavailableDeploymentAndShutdownOperationFacts } from './__tests__/test-utils/runtime-operation-facts.ts';
 import { handleSessionStateCommands } from './daemon/handlers/session-state.ts';
 import { createRequestRuntimeBindings } from './daemon/request-runtime-binding.ts';
 import { makeSessionStore } from './__tests__/test-utils/store-factory.ts';
@@ -472,6 +473,7 @@ function binding(options: {
 function unavailableFacts() {
   const unavailable = { available: false, reason: 'unsupported-provider-mode' } as const;
   return {
+    ...unavailableDeploymentAndShutdownOperationFacts,
     appLogInspect: unavailable,
     appLogDoctor: unavailable,
     appLogStart: unavailable,

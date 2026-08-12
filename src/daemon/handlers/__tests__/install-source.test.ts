@@ -14,6 +14,7 @@ import {
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
 import { mkdtempForTestSync } from '../../../__tests__/test-utils/tmp-dir.ts';
+import { unavailableApplicationLifecycleOperationFacts } from '../../../__tests__/test-utils/runtime-operation-facts.ts';
 import type {
   BindDeviceRuntime,
   InspectDeviceRuntimeFacts,
@@ -341,6 +342,7 @@ function sourceRuntimeFacts(
       providerMode: options.providerMode ?? 'local',
     },
     operations: {
+      ...unavailableApplicationLifecycleOperationFacts,
       appLogInspect: unavailable,
       appLogDoctor: unavailable,
       appLogStart: unavailable,

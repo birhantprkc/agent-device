@@ -12,6 +12,7 @@ import type {
   BindDeviceRuntime,
   InspectDeviceRuntimeFacts,
 } from '../../request-runtime-binding.ts';
+import { unavailableApplicationLifecycleOperationFacts } from '../../../__tests__/test-utils/runtime-operation-facts.ts';
 
 export type CapabilitiesAdmissionRuntimeOptions = Readonly<{
   appLogAvailable: boolean;
@@ -54,6 +55,7 @@ function createAdmissionFacts(
   return {
     device: { ...deviceShape(device), providerMode: options.providerMode },
     operations: {
+      ...unavailableApplicationLifecycleOperationFacts,
       appLogInspect: options.appLogAvailable ? available : unavailable,
       appLogDoctor: unavailable,
       appLogStart: unavailable,

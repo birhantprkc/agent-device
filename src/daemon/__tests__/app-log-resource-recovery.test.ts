@@ -12,6 +12,7 @@ import {
 } from '@agent-device/contracts/platform';
 import { createDurableResourceEnvelope } from '@agent-device/capture-kit';
 import { createTestAppLogLiveHandle } from '../../__tests__/test-utils/app-log-live-handle.ts';
+import { unavailableDeploymentAndShutdownOperationFacts } from '../../__tests__/test-utils/runtime-operation-facts.ts';
 import { mkdtempForTestSync } from '../../__tests__/test-utils/tmp-dir.ts';
 import { recoverAppLogResourcesAfterDaemonLock } from '../app-log-resource-recovery.ts';
 import { appLogResourceStore } from '../app-log-resource-store.ts';
@@ -355,6 +356,7 @@ function makeGateway(
           bootTarget: { available: true as const },
           bootTargetHeadless: unavailableRecording,
           listApps: unavailableRecording,
+          ...unavailableDeploymentAndShutdownOperationFacts,
           ...applicationLifecycleOperationFacts({
             resolveOpenTarget: unavailableRecording,
             prepareApplicationOpen: unavailableRecording,

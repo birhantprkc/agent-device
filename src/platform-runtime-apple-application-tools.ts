@@ -62,11 +62,6 @@ export function createAppleApplicationTools(): AppleApplicationTools {
       await clearRuntimeHintValues({ device, ...input });
     },
     dismissCloseAlerts: async (device, input) => await dismissMacOsCloseAlerts(device, input),
-    shutdownTarget: async (device) => {
-      if (!isIosFamily(device) || device.kind !== 'simulator') return undefined;
-      const { shutdownDeviceTarget } = await import('./daemon/target-shutdown.ts');
-      return await shutdownDeviceTarget(device);
-    },
     detachRunnerSessionsForShutdown: async () => {
       const { detachIosSimulatorRunnerSessionsForShutdown } =
         await import('./platforms/apple/core/runner/runner-client.ts');

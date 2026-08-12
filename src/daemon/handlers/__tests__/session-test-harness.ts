@@ -81,14 +81,6 @@ vi.mock('../../../platforms/apple/core/apps.ts', async (importOriginal) => {
     resolveIosSimulatorDeepLinkBundleId: vi.fn(async () => undefined),
   };
 });
-vi.mock('../session-deploy.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../session-deploy.ts')>();
-  return {
-    ...actual,
-    defaultInstallOps: { ios: vi.fn(), android: vi.fn(), harmonyos: vi.fn() },
-    defaultReinstallOps: { ios: vi.fn(), android: vi.fn(), harmonyos: vi.fn() },
-  };
-});
 
 import * as path from 'node:path';
 import { cleanupRetainedMaterializedPathsForSession } from '../../materialized-path-registry.ts';
@@ -116,7 +108,6 @@ import {
   resolveIosApp,
   resolveIosSimulatorDeepLinkBundleId,
 } from '../../../platforms/apple/core/apps.ts';
-import { defaultInstallOps, defaultReinstallOps } from '../session-deploy.ts';
 import { dispatchApplicationLifecycleEffect } from '../../__tests__/application-lifecycle-runtime-fixture.ts';
 
 export const mockDispatch = vi.mocked(dispatchCommand);
@@ -142,10 +133,6 @@ export const mockResolveIosApp = vi.mocked(resolveIosApp);
 export const mockResolveIosSimulatorDeepLinkBundleId = vi.mocked(
   resolveIosSimulatorDeepLinkBundleId,
 );
-const mockDefaultInstallOpsIos = vi.mocked(defaultInstallOps.ios);
-const mockDefaultInstallOpsAndroid = vi.mocked(defaultInstallOps.android);
-const mockDefaultReinstallOpsIos = vi.mocked(defaultReinstallOps.ios);
-const mockDefaultReinstallOpsAndroid = vi.mocked(defaultReinstallOps.android);
 
 beforeEach(() => {
   vi.useRealTimers();
@@ -196,10 +183,6 @@ beforeEach(() => {
   });
   mockResolveIosSimulatorDeepLinkBundleId.mockReset();
   mockResolveIosSimulatorDeepLinkBundleId.mockResolvedValue(undefined);
-  mockDefaultInstallOpsIos.mockReset();
-  mockDefaultInstallOpsAndroid.mockReset();
-  mockDefaultReinstallOpsIos.mockReset();
-  mockDefaultReinstallOpsAndroid.mockReset();
 });
 
 export function makeSessionStore(): SessionStore {

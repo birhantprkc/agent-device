@@ -10,6 +10,7 @@ import {
   type PlatformRuntimeOperations,
   type RuntimeFacts,
 } from '@agent-device/contracts/platform';
+import { unavailableDeploymentAndShutdownOperationFacts } from '../../../__tests__/test-utils/runtime-operation-facts.ts';
 import { deviceShape, type DeviceInfo } from '@agent-device/kernel/device';
 import { vi } from 'vitest';
 import type {
@@ -56,6 +57,7 @@ export function lifecycleRuntimeFacts(device: DeviceInfo): RuntimeFacts<Platform
       bootTarget: unavailable,
       bootTargetHeadless: unavailable,
       listApps: unavailable,
+      ...unavailableDeploymentAndShutdownOperationFacts,
       ...applicationLifecycleOperationFacts({
         resolveOpenTarget: available,
         prepareApplicationOpen: available,
@@ -80,6 +82,7 @@ function providerLifecycleRuntimeFacts(
     device: { ...localFacts.device, providerMode: 'provider-runtime' },
     operations: {
       ...localFacts.operations,
+      ...unavailableDeploymentAndShutdownOperationFacts,
       ...applicationLifecycleOperationFacts({
         resolveOpenTarget: available,
         prepareApplicationOpen: available,

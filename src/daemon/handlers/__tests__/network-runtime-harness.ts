@@ -9,6 +9,7 @@ import {
   type RuntimeOperationFact,
   type RuntimeOwnerRef,
 } from '@agent-device/contracts/platform';
+import { unavailableDeploymentAndShutdownOperationFacts } from '../../../__tests__/test-utils/runtime-operation-facts.ts';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import type { BindDeviceRuntime } from '../../request-runtime-binding.ts';
 
@@ -56,6 +57,7 @@ export function createNetworkRuntime(
             bootTarget: unavailable,
             bootTargetHeadless: unavailable,
             listApps: unavailable,
+            ...unavailableDeploymentAndShutdownOperationFacts,
             ...applicationLifecycleOperationFacts({
               resolveOpenTarget: unavailable,
               prepareApplicationOpen: unavailable,

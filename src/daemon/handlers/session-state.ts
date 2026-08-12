@@ -1,5 +1,11 @@
-import { asAppError } from '@agent-device/kernel/errors';
-import { resolveDeviceReadinessRuntimePlan, appStateUse } from '@agent-device/contracts/platform';
+import { AppError, asAppError } from '@agent-device/kernel/errors';
+import type { TargetShutdownResult } from '@agent-device/contracts/device';
+import {
+  resolveDeviceReadinessRuntimePlan,
+  appStateUse,
+  shutdownTargetUse,
+  type RuntimeOperationFact,
+} from '@agent-device/contracts/platform';
 import {
   isApplePlatform,
   isIosFamily,
@@ -9,7 +15,6 @@ import {
 } from '@agent-device/kernel/device';
 import type { DaemonRequest, DaemonResponse } from '../types.ts';
 import { SessionStore } from '../session-store.ts';
-import { shutdownDeviceTarget } from '../target-shutdown.ts';
 import { resolveAndroidSerialAllowlist } from '../../utils/device-isolation.ts';
 import {
   hasExplicitSessionFlag,
@@ -17,7 +22,7 @@ import {
   resolveCommandDevice,
   selectorTargetsSessionDevice,
 } from './session-device-utils.ts';
-import { errorResponse, requireCommandSupported } from './response.ts';
+import { errorResponse } from './response.ts';
 import type { BindDeviceRuntime, InspectDeviceRuntimeFacts } from '../request-runtime-binding.ts';
 import {
   admitRuntimeOperations,
@@ -41,6 +46,32 @@ function bootUnavailableResponse(headless: boolean): UnavailableRuntimeResponse 
       undefined,
       unavailable.hint ? { hint: unavailable.hint } : undefined,
     );
+}
+
+function requireInspectFacts(
+  inspectFacts: InspectDeviceRuntimeFacts | undefined,
+): InspectDeviceRuntimeFacts {
+  if (inspectFacts) return inspectFacts;
+  throw new AppError('COMMAND_FAILED', 'Device runtime facts inspection is unavailable.', {
+    reason: 'runtime-gateway-missing',
+  });
+}
+
+function requireBindDevice(bindDevice: BindDeviceRuntime | undefined): BindDeviceRuntime {
+  if (bindDevice) return bindDevice;
+  throw new AppError('COMMAND_FAILED', 'Device runtime binding is unavailable.', {
+    reason: 'runtime-gateway-missing',
+  });
+}
+
+function shutdownUnavailableResponse(fact: RuntimeOperationFact) {
+  if (fact.available) return null;
+  return errorResponse(
+    'UNSUPPORTED_OPERATION',
+    'shutdown is supported only for Apple simulators and Android emulators.',
+    undefined,
+    fact.hint ? { hint: fact.hint } : undefined,
+  );
 }
 
 function hasAndroidAvdIdentity(
@@ -275,10 +306,11 @@ export async function handleSessionStateCommands(params: {
       ensureReady: false,
       flags,
       session: activeSession,
+      androidAvdSelection: 'include-stopped',
     });
-    const unsupported = requireCommandSupported('shutdown', device, {
-      message: 'shutdown is supported only for Apple simulators and Android emulators.',
-    });
+    const inspectFacts = requireInspectFacts(params.inspectFacts);
+    const facts = await inspectFacts(device);
+    const unsupported = shutdownUnavailableResponse(facts.operations.shutdownTarget);
     if (unsupported) return unsupported;
 
     if (
@@ -301,7 +333,10 @@ export async function handleSessionStateCommands(params: {
       );
     }
 
-    const shutdown = await shutdownDeviceTarget(device);
+    const bindDevice = requireBindDevice(params.bindDevice);
+    const shutdown = await (
+      await bindDevice(device, shutdownTargetUse)
+    ).operations.shutdownTarget();
     if (!shutdown.success) {
       return errorResponse(
         shutdown.error?.code ?? 'COMMAND_FAILED',
@@ -353,7 +388,7 @@ function resolveAndroidSerialAllowlistForAppState(value: string | undefined): st
 }
 
 function shutdownFailureMessage(
-  shutdown: Awaited<ReturnType<typeof shutdownDeviceTarget>>,
+  shutdown: TargetShutdownResult,
 ): string {
   const message = shutdown.error?.message ?? shutdown.stderr.trim();
   return message.length > 0 ? message : 'Shutdown failed';
