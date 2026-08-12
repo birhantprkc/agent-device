@@ -1,20 +1,15 @@
-import { deviceShape, type DeviceInfo, type Platform } from '@agent-device/kernel/device';
-import { AppError } from '@agent-device/kernel/errors';
+import { deviceShape, type DeviceInfo } from '@agent-device/kernel/device';
 import {
   applicationLifecycleOperationFacts,
   type ApplicationLifecycleOperationFacts,
 } from './application-lifecycle-runtime.ts';
-import type {
-  PlatformRuntimeOperations,
-  PlatformRuntimeOwner,
-} from './platform-runtime-operations.ts';
+import type { PlatformRuntimeOperations } from './platform-runtime-operations.ts';
 import type {
   DeviceBinding,
   RuntimeFacts,
   RuntimeOperationUnavailability,
   RuntimeOwnerRef,
 } from './platform-runtime.ts';
-import { localRuntimeOwner, sameRuntimeOwner } from './platform-runtime.ts';
 
 /**
  * A runtime-contract helper for provider ownership gaps. It never assigns lifecycle semantics:
@@ -43,36 +38,6 @@ type FrozenUnavailablePlatformRuntimeFacts = Readonly<{
   shutdown: RuntimeOperationUnavailability;
   lifecycle: ApplicationLifecycleOperationFacts;
 }>;
-
-/** Builds one honest combined owner for a family with no platform operations. */
-export function createUnavailablePlatformRuntimeOwner(
-  family: Platform,
-  unavailable: UnavailablePlatformRuntimeFacts,
-): PlatformRuntimeOwner {
-  const owner = localRuntimeOwner(family);
-  const facts = freezeUnavailableFacts(unavailable);
-  return Object.freeze({
-    owner,
-    ownsDevice: (device) => device.platform === family,
-    inspectFacts: async (device) => createUnavailablePlatformRuntimeFacts(device, owner, facts),
-    bind: async (request) => {
-      if (request.intent.kind === 'exact-owner' && !sameRuntimeOwner(request.intent.owner, owner)) {
-        throw new AppError(
-          'UNSUPPORTED_OPERATION',
-          family + ' platform runtime owner identity does not match',
-        );
-      }
-      if (request.device.platform !== family) {
-        throw new AppError(
-          'UNSUPPORTED_PLATFORM',
-          family + ' platform runtime cannot bind ' + request.device.platform,
-        );
-      }
-      return createUnavailablePlatformRuntimeBinding(request.device, owner, facts);
-    },
-    shutdown: async () => undefined,
-  });
-}
 
 export function createUnavailablePlatformRuntimeBinding(
   device: DeviceInfo,

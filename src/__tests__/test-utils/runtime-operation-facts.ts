@@ -27,15 +27,14 @@ export const unavailableDeploymentAndShutdownOperationFacts = Object.freeze({
 });
 
 /** Default facts for tests that are unrelated to application lifecycle commands. */
-export const unavailableApplicationLifecycleOperationFacts =
-  applicationLifecycleOperationFacts({
-    resolveOpenTarget: unavailable,
-    prepareApplicationOpen: unavailable,
-    openApplication: unavailable,
-    applyRuntimeHints: unavailable,
-    clearRuntimeHints: unavailable,
-    closeApplication: unavailable,
-    finalizeApplicationClose: unavailable,
-    prepareAppleRunner: unavailable,
-    configureProviderPortReverse: unavailable,
-  });
+export const unavailableApplicationLifecycleOperationFacts = applicationLifecycleOperationFacts({
+  resolveOpenTarget: unavailable,
+  prepareApplicationOpen: unavailable,
+  openApplication: unavailable,
+  applyRuntimeHints: unavailable,
+  clearRuntimeHints: unavailable,
+  closeApplication: unavailable,
+  finalizeApplicationClose: unavailable,
+  prepareAppleRunner: unavailable,
+  configureProviderPortReverse: unavailable,
+});

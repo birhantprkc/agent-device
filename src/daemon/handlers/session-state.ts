@@ -387,9 +387,7 @@ function resolveAndroidSerialAllowlistForAppState(value: string | undefined): st
   return allowlist ? [...allowlist].sort() : undefined;
 }
 
-function shutdownFailureMessage(
-  shutdown: TargetShutdownResult,
-): string {
+function shutdownFailureMessage(shutdown: TargetShutdownResult): string {
   const message = shutdown.error?.message ?? shutdown.stderr.trim();
   return message.length > 0 ? message : 'Shutdown failed';
 }

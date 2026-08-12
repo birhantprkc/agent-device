@@ -49,25 +49,25 @@ export type LimrunPlatformRuntimeOwnerOptions = Omit<
   'isSessionActive'
 > &
   Readonly<{
-  host: PlatformRuntimeHost;
-  runtimeInstance: string;
-  ownsDevice(device: DeviceInfo): boolean;
-  getInteractor(device: DeviceInfo, runner?: RunnerContext): Interactor | undefined;
-  openCurrent(device: DeviceInfo): Promise<LimrunAppLogReader | undefined>;
-  hasLiveSession(device: DeviceInfo): boolean;
-  reconnect(
-    descriptor: LimrunAppLogDescriptor,
-    signal?: AbortSignal,
-  ): Promise<LimrunAppLogReconnectOutcome>;
-  listApps(
-    device: DeviceInfo,
-    filter: AppsFilter,
-    signal: AbortSignal,
-  ): Promise<readonly { id: string; name: string }[]>;
-  getAppState(device: DeviceInfo, signal: AbortSignal): Promise<AppStateRuntimeResult>;
-  configurePortReverse(
-    options: ProviderPortReverseOptions,
-  ): Promise<Record<string, unknown> | undefined>;
+    host: PlatformRuntimeHost;
+    runtimeInstance: string;
+    ownsDevice(device: DeviceInfo): boolean;
+    getInteractor(device: DeviceInfo, runner?: RunnerContext): Interactor | undefined;
+    openCurrent(device: DeviceInfo): Promise<LimrunAppLogReader | undefined>;
+    hasLiveSession(device: DeviceInfo): boolean;
+    reconnect(
+      descriptor: LimrunAppLogDescriptor,
+      signal?: AbortSignal,
+    ): Promise<LimrunAppLogReconnectOutcome>;
+    listApps(
+      device: DeviceInfo,
+      filter: AppsFilter,
+      signal: AbortSignal,
+    ): Promise<readonly { id: string; name: string }[]>;
+    getAppState(device: DeviceInfo, signal: AbortSignal): Promise<AppStateRuntimeResult>;
+    configurePortReverse(
+      options: ProviderPortReverseOptions,
+    ): Promise<Record<string, unknown> | undefined>;
   }>;
 
 function deploymentOptions(

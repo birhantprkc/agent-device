@@ -175,8 +175,7 @@ function bindWebDriverPlatformRuntime(
       bindWebDriverApplicationLifecycle({
         device,
         signal,
-        getInteractor: (selectedDevice, runner) =>
-          options.getInteractor?.(selectedDevice, runner),
+        getInteractor: (selectedDevice, runner) => options.getInteractor?.(selectedDevice, runner),
       }),
       facts.operations,
     ),
