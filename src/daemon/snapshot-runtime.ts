@@ -26,6 +26,7 @@ import {
   type CapturedSnapshotQuality,
 } from './snapshot-quality-latch.ts';
 import { createDaemonRuntimePolicy } from './runtime-policy.ts';
+import { captureSparseFallbackScreenshotWarning } from './sparse-fallback-screenshot.ts';
 import { createDaemonRuntimeSessionStore } from './runtime-session.ts';
 import { getRequestSignal } from '../request/cancel.ts';
 import { isInteractiveObservation } from './session-action-recorder.ts';
@@ -53,19 +54,14 @@ export async function dispatchSnapshotViaRuntime(params: {
         customActions: req.flags?.snapshotCustomActions,
         forceFull: req.flags?.snapshotForceFull,
       });
-      // #1076 versioned refs: the snapshot response is a ref-issuing response,
-      // so it carries the stored tree's generation ONCE (`refsGeneration`) —
-      // the node tree itself stays plain `e12` refs (token economy). The
-      // capture above already stored the next session via setRecord, so the
-      // store holds the generation these refs were minted from.
-      const refsGeneration = publishedSnapshotGeneration(req, params.sessionStore.get(sessionName));
-      // ADR 0014: retain provenance in the immutable operational/ref-frame tree;
-      // project only the published copy so settle and replay keep the full evidence.
-      const publicNodes = stripAndroidSystemChromeProvenance(result.nodes);
-      const publicResult =
-        publicNodes === result.nodes ? result : { ...result, nodes: publicNodes };
       return {
-        data: refsGeneration === undefined ? publicResult : { ...publicResult, refsGeneration },
+        data: await publishSnapshotResult({
+          req,
+          result,
+          sessionName,
+          logPath: params.logPath,
+          session: params.sessionStore.get(sessionName),
+        }),
         record: {
           kind: 'snapshot',
           nodes: result.nodes.length,
@@ -74,6 +70,42 @@ export async function dispatchSnapshotViaRuntime(params: {
       };
     },
   });
+}
+
+/**
+ * Project a capture into the response the client sees: the record-only provenance is
+ * dropped, the ref generation is stamped, and an unreadable screen carries its fallback
+ * screenshot.
+ */
+async function publishSnapshotResult(params: {
+  req: DaemonRequest;
+  result: Awaited<ReturnType<ReturnType<typeof createSnapshotRuntime>['capture']['snapshot']>>;
+  sessionName: string;
+  logPath: string;
+  session: SessionState | undefined;
+}): Promise<DaemonResponseData> {
+  const { req, result } = params;
+  // #1076 versioned refs: the snapshot response is a ref-issuing response,
+  // so it carries the stored tree's generation ONCE (`refsGeneration`) —
+  // the node tree itself stays plain `e12` refs (token economy). The
+  // capture already stored the next session via setRecord, so the store
+  // holds the generation these refs were minted from.
+  const refsGeneration = publishedSnapshotGeneration(req, params.session);
+  // ADR 0014: retain provenance in the immutable operational/ref-frame tree;
+  // project only the published copy so settle and replay keep the full evidence.
+  const publicNodes = stripAndroidSystemChromeProvenance(result.nodes);
+  const publicResult = publicNodes === result.nodes ? result : { ...result, nodes: publicNodes };
+  const fallbackWarning = await captureSparseFallbackScreenshotWarning({
+    req,
+    session: params.session,
+    sessionName: params.sessionName,
+    logPath: params.logPath,
+    verdict: result.snapshotQuality,
+  });
+  const warned = fallbackWarning
+    ? { ...publicResult, warnings: [...(publicResult.warnings ?? []), fallbackWarning] }
+    : publicResult;
+  return refsGeneration === undefined ? warned : { ...warned, refsGeneration };
 }
 
 function publishedSnapshotGeneration(

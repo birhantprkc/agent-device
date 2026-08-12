@@ -100,6 +100,11 @@ the strategy owns which tiers it may use.
   **sparse** capture reports that no backend could read the screen and points you at `screenshot`
   as visual truth plus coordinate taps. Use `--json` and read `snapshotQuality` when you need the
   state, backend, and reason behind **degraded** output.
+- A **sparse** `snapshot` takes that screenshot for you and links its path in the warnings, so the
+  visual fallback costs no extra command. When the screen was reachable but published no
+  accessibility content at all, the warning also names it as a likely app accessibility bug —
+  assistive technologies get the same empty tree. Reasons that describe a limit of this tool
+  instead (a refused or budget-exhausted capture) are not attributed to the app.
 - `--raw` uses the **raw diagnostic strategy**: it stays tree-first and preserves strict capture
   failures, so a real XCTest accessibility serialization error surfaces as an error rather than as
   an empty tree.

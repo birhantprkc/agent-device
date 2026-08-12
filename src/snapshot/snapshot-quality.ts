@@ -163,9 +163,25 @@ function stateWarning(verdict: SnapshotQualityVerdict): string[] {
       'No snapshot backend could read this screen' +
         (verdict.reason ? ` (${verdict.reason})` : '') +
         '. Its refs and selectors are invalid. Use screenshot as visual truth and coordinate taps; retry snapshot after navigating.',
+      ...appAccessibilityDefectWarning(verdict),
     ];
   }
   return [];
+}
+
+/**
+ * Only `sparse-tree` is evidence about the APP: every backend reached the screen and it
+ * published no semantic content, which is the same emptiness assistive tech gets. The
+ * other sparse reasons are limits of this tool — the AX server refusing a large tree
+ * (`ax-rejected`), a capture running out of budget, a backend that returned nothing at
+ * all — and attributing those to the app would send readers to file bugs against code
+ * that is not broken.
+ */
+function appAccessibilityDefectWarning(verdict: SnapshotQualityVerdict): string[] {
+  if (verdict.reasonCode !== 'sparse-tree') return [];
+  return [
+    'This screen publishes no accessibility content at all; assistive technologies see the same empty tree, so it is worth flagging as an app accessibility bug rather than only an automation limitation.',
+  ];
 }
 
 function depthWarning(verdict: SnapshotQualityVerdict): string[] {
