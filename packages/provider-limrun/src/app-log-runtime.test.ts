@@ -134,21 +134,21 @@ test('keeps exact-owner app-log recovery available without a process-local sessi
   expect(binding.operations.listApps).toBeUndefined();
   expect(binding.facts.operations.appLogInspect).toMatchObject({
     available: false,
-    reason: 'unsupported-provider-mode',
+    reason: 'owner-capability-missing',
   });
   expect(binding.facts.operations.appLogReattach).toEqual({ available: true });
   expect(binding.facts.operations.appLogCleanup).toEqual({ available: true });
   expect(binding.facts.operations.appState).toMatchObject({
     available: false,
-    reason: 'unsupported-provider-mode',
+    reason: 'owner-capability-missing',
   });
   expect(binding.facts.operations.ensureReady).toMatchObject({
     available: false,
-    reason: 'unsupported-provider-mode',
+    reason: 'owner-capability-missing',
   });
   expect(binding.facts.operations.listApps).toMatchObject({
     available: false,
-    reason: 'unsupported-provider-mode',
+    reason: 'owner-capability-missing',
   });
   expect(() => narrowDeviceBinding(binding, appStateUse)).toThrow();
   expect(() => narrowDeviceBinding(binding, bootTargetUse)).toThrow();
@@ -312,11 +312,11 @@ test('fails closed for a stale Android identity before exposing facts or binding
   const facts = await owner.inspectFacts(staleDevice);
   expect(facts.operations.ensureReady).toMatchObject({
     available: false,
-    reason: 'unsupported-provider-mode',
+    reason: 'owner-capability-missing',
   });
   expect(facts.operations.appState).toMatchObject({
     available: false,
-    reason: 'unsupported-provider-mode',
+    reason: 'owner-capability-missing',
   });
   await expect(
     owner.bind({ device: staleDevice, intent: { kind: 'ordinary' }, scope }),

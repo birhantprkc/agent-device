@@ -224,7 +224,7 @@ test('a stale Limrun session publishes unavailable lifecycle facts and admits re
   ] as const) {
     expect(facts.operations[operation]).toMatchObject({
       available: false,
-      reason: 'unsupported-provider-mode',
+      reason: 'owner-capability-missing',
     });
   }
 
