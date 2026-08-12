@@ -106,6 +106,7 @@ test('doctor preserves the legacy unsupported HarmonyOS target-app check', async
       ensureReady: available,
       bootTarget: unavailable,
       bootTargetHeadless: unavailable,
+      shutdownTarget: unavailable,
     },
   });
   const inspectFacts: InspectDeviceRuntimeFacts = vi.fn(async () => runtimeFacts());

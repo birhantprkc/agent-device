@@ -54,7 +54,10 @@ import type {
 import type { DeviceClaimReconciler } from '../device-claims.ts';
 import type { AppLogAdmissionLedger } from '../app-log-admission-ledger.ts';
 import type { ScreenRecordingAdmissionLedger } from '../screen-recording-admission-ledger.ts';
-import type { PlatformRequestScope } from '@agent-device/contracts/platform';
+import type {
+  DeviceShutdownCloseCapability,
+  PlatformRequestScope,
+} from '@agent-device/contracts/platform';
 
 const PREPARE_IOS_RUNNER_TIMING_NOTE =
   'Top-level prepare timing fields are diagnostic and may overlap; use timing.additiveParts for additive wall-clock phases.';
@@ -287,6 +290,7 @@ export type SessionCommandInput = {
   androidAdbExecutor?: AndroidAdbExecutor;
   bindDevice?: BindDeviceRuntime;
   inspectFacts?: InspectDeviceRuntimeFacts;
+  getCloseShutdown?: () => Promise<DeviceShutdownCloseCapability>;
   bindExactDevice?: BindExactDeviceRuntime;
   appLogAdmissionLedger?: AppLogAdmissionLedger;
   screenRecordingAdmissionLedger?: ScreenRecordingAdmissionLedger;
@@ -550,6 +554,7 @@ const SESSION_COMMAND_HANDLER_IMPLS = {
     sessionStore,
     leaseRegistry,
     leaseLifecycleProvider,
+    getCloseShutdown,
   }) =>
     await handleCloseCommand({
       req,
@@ -558,6 +563,7 @@ const SESSION_COMMAND_HANDLER_IMPLS = {
       sessionStore,
       leaseRegistry,
       leaseLifecycleProvider,
+      getCloseShutdown,
     }),
 } satisfies Record<DescriptorSessionRouteCommandName, SessionCommandHandler>;
 
@@ -575,6 +581,7 @@ export async function handleSessionCommands(
     invokeReplayAction,
     androidAdbExecutor,
     inspectFacts,
+    getCloseShutdown,
     bindDevice,
     bindExactDevice,
     appLogAdmissionLedger,
@@ -600,6 +607,7 @@ export async function handleSessionCommands(
     invokeReplayAction,
     androidAdbExecutor,
     inspectFacts,
+    getCloseShutdown,
     bindDevice,
     bindExactDevice,
     appLogAdmissionLedger,

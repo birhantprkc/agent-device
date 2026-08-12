@@ -151,10 +151,6 @@ export function createApplePlatformRuntime(host: PlatformRuntimeHost): PlatformR
                   ),
               }
             : {}),
-                    request.scope.signal,
-                  ),
-              }
-            : {}),
         }),
         [Symbol.asyncDispose]: async () => await logs[Symbol.asyncDispose](),
       }) satisfies DeviceBinding<PlatformRuntimeOperations>;

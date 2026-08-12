@@ -2,6 +2,7 @@ import type {
   InventoryPlatformModule,
   PlatformRuntimeModule,
   PlatformModuleMetadata,
+  DeviceShutdownRuntimeDependencies,
 } from '@agent-device/contracts/platform';
 
 const metadata = Object.freeze({
@@ -23,3 +24,11 @@ export const inventoryModule = Object.freeze({
     return createAppleInventorySource(host);
   },
 } satisfies InventoryPlatformModule<'apple'>);
+
+/** Loads Apple shutdown mechanics only when the neutral shutdown capability is exercised. */
+export async function loadShutdownRuntime(
+  dependencies: Pick<DeviceShutdownRuntimeDependencies, 'appleTools'>,
+) {
+  const { createAppleShutdownRuntime } = await import('./shutdown/runtime.ts');
+  return createAppleShutdownRuntime(dependencies);
+}

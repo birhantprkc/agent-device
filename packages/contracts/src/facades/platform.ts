@@ -218,7 +218,11 @@ export type {
   EnsureReadyInput,
 } from '../device-readiness-runtime.ts';
 export type {
+  DeviceShutdownCloseCapability,
+  DeviceShutdownFamilyRuntime,
+  DeviceShutdownRuntimeDependencies,
   DeviceShutdownRuntimeHost,
+  DeviceShutdownRuntimeLoaders,
   DeviceShutdownRuntimeOperations,
 } from '../device-shutdown-runtime.ts';
 export {

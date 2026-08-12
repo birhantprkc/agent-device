@@ -9,17 +9,20 @@ import {
   type AppStateRuntimeResult,
   type ComposedDeviceInventoryGateways,
   type DeviceRuntimeGateway,
+  type DeviceShutdownRuntimeDependencies,
   type PlatformRuntimeModule,
   type PlatformRuntimeOperations,
 } from '@agent-device/contracts/platform';
 import {
   inventoryModule as appleInventoryModule,
+  loadShutdownRuntime as loadAppleShutdownRuntime,
   runtimeModule as appleRuntimeModule,
 } from '@agent-device/platform-apple';
 import {
   createAndroidInventoryModule,
   parseAndroidForegroundApp as parseAndroidPackageForegroundApp,
   readAndroidAppState as readAndroidPackageAppState,
+  loadShutdownRuntime as loadAndroidShutdownRuntime,
   runtimeModule as androidRuntimeModule,
 } from '@agent-device/platform-android';
 import {
@@ -58,6 +61,13 @@ export async function parseAndroidForegroundApp(
 
 const androidInventoryModule = createAndroidInventoryModule({
   sdkRoots: configuredValues(process.env.ANDROID_SDK_ROOT, process.env.ANDROID_HOME),
+});
+
+const shutdownLoaders = Object.freeze({
+  apple: async (dependencies: Pick<DeviceShutdownRuntimeDependencies, 'appleTools'>) =>
+    await loadAppleShutdownRuntime(dependencies),
+  android: async (dependencies: Pick<DeviceShutdownRuntimeDependencies, 'commands'>) =>
+    await loadAndroidShutdownRuntime(dependencies),
 });
 
 const harmonyosInventoryModule = createHarmonyInventoryModule({
@@ -117,6 +127,7 @@ export function createPlatformRuntimeGateway(
       return createPlatformRuntimeHost({
         sessionsDir: options.sessionsDir,
         resolveSessionArtifacts: options.resolveSessionArtifacts,
+        shutdownLoaders,
       });
     },
     providerRuntimes: options.providerRuntimes,

@@ -1,6 +1,7 @@
 import type { PlatformRuntimeHost } from '@agent-device/contracts/platform';
 import { isMacOs, type DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
+import { getSimulatorState, simctlArgs } from '../simulator-state.ts';
 
 const BOOT_TIMEOUT_MS = 120_000;
 const LIST_TIMEOUT_MS = 15_000;
@@ -18,7 +19,7 @@ export async function ensureAppleReady(
   }
   if (device.kind !== 'simulator') return { ...device, booted: true };
 
-  const state = await simulatorState(host, device, signal);
+  const state = await getSimulatorState(host.appleTools, device, signal, LIST_TIMEOUT_MS);
   if (state !== 'Booted') {
     host.deviceReadiness.appleAutomation.keepHot(device);
     await bootSimulator(host, device, signal);
@@ -71,7 +72,7 @@ async function bootSimulator(
         exitCode: status.exitCode,
       });
     }
-    if ((await simulatorState(host, device, signal)) !== 'Booted') {
+    if ((await getSimulatorState(host.appleTools, device, signal, LIST_TIMEOUT_MS)) !== 'Booted') {
       throw new AppError('COMMAND_FAILED', 'Simulator is still booting', { deviceId: device.id });
     }
   } catch (error) {
@@ -79,39 +80,6 @@ async function bootSimulator(
     signal.throwIfAborted();
     throw error;
   }
-}
-
-async function simulatorState(
-  host: PlatformRuntimeHost,
-  device: DeviceInfo,
-  signal: AbortSignal,
-): Promise<string | null> {
-  const result = await host.appleTools.run(
-    {
-      tool: 'simctl',
-      args: simctlArgs(device, ['list', 'devices', '-j']),
-      allowFailure: true,
-      timeoutMs: LIST_TIMEOUT_MS,
-    },
-    signal,
-  );
-  if (result.exitCode !== 0) return null;
-  try {
-    const payload = JSON.parse(result.stdout) as {
-      devices: Record<string, Array<{ udid: string; state: string }>>;
-    };
-    return (
-      Object.values(payload.devices)
-        .flat()
-        .find(({ udid }) => udid === device.id)?.state ?? null
-    );
-  } catch {
-    return null;
-  }
-}
-
-function simctlArgs(device: DeviceInfo, args: readonly string[]): string[] {
-  return device.simulatorSetPath ? ['--set', device.simulatorSetPath, ...args] : [...args];
 }
 
 async function showSimulator(host: PlatformRuntimeHost, signal: AbortSignal): Promise<void> {

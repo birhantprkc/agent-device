@@ -19,6 +19,14 @@ const sharedHostSource = readFileSync(
   new URL('../../../platform-runtime-device-shutdown-host.ts', import.meta.url),
   'utf8',
 );
+const appleShutdownSource = readFileSync(
+  new URL('../../../../packages/platform-apple/src/shutdown/runtime.ts', import.meta.url),
+  'utf8',
+);
+const androidShutdownSource = readFileSync(
+  new URL('../../../../packages/platform-android/src/shutdown/runtime.ts', import.meta.url),
+  'utf8',
+);
 
 test('shutdown descriptor declares one canonical runtime operation', () => {
   const shutdown = commandDescriptors.find(({ name }) => name === 'shutdown');
@@ -34,18 +42,27 @@ test('canonical shutdown and close parity share one concrete teardown mechanic',
   const shutdownRoute = sessionStateSource.slice(
     sessionStateSource.indexOf("if (req.command === 'shutdown')"),
   );
+  expect(shutdownRoute.match(/inspectFacts\(device\)/g)).toHaveLength(1);
   expect(shutdownRoute.match(/bindDevice\(device, shutdownTargetUse\)/g)).toHaveLength(1);
   expect(shutdownRoute).not.toContain('operations.ensureReady');
   expect(shutdownRoute).not.toContain('ensureReadyUse');
   expect(shutdownRoute).not.toContain('target-shutdown');
 
   expect(sessionCloseSource).toContain("from '../session-close-shutdown.ts'");
-  expect(closeAdapterSource).toContain('shutdownLocalDeviceTarget');
+  expect(closeAdapterSource).toContain('DeviceShutdownCloseCapability');
   expect(closeAdapterSource).not.toContain('shutdownSimulator');
   expect(closeAdapterSource).not.toContain('runAndroidAdb');
 
   expect(sharedHostSource).toContain('createDeviceShutdownRuntimeHost');
-  expect(sharedHostSource).toContain('shutdownLocalDeviceTarget');
-  expect(sharedHostSource).toContain('shutdownIosSimulator');
-  expect(sharedHostSource).toContain('shutdownAndroidEmulator');
+  expect(sharedHostSource).toContain('shutdownTargetForClose');
+  expect(sharedHostSource).not.toContain('isIosFamily');
+  expect(sharedHostSource).not.toContain('shutdownSimulator');
+  expect(sharedHostSource).not.toContain('runAndroidAdb');
+  expect(sharedHostSource).not.toContain('shutdownIosSimulator');
+  expect(sharedHostSource).not.toContain('shutdownAndroidEmulator');
+
+  expect(appleShutdownSource).toContain("tool: 'simctl'");
+  expect(appleShutdownSource).toContain("device.appleOs !== 'watchos'");
+  expect(androidShutdownSource).toContain("executable: 'adb'");
+  expect(androidShutdownSource).toContain("device.platform === 'android'");
 });

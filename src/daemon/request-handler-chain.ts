@@ -16,7 +16,10 @@ import type {
 import type { DeviceClaimReconciler } from './device-claims.ts';
 import type { AppLogAdmissionLedger } from './app-log-admission-ledger.ts';
 import type { ScreenRecordingAdmissionLedger } from './screen-recording-admission-ledger.ts';
-import type { PlatformRequestScope } from '@agent-device/contracts/platform';
+import type {
+  DeviceShutdownCloseCapability,
+  PlatformRequestScope,
+} from '@agent-device/contracts/platform';
 import type { RequestPlatformProviderScope } from './request-platform-providers.ts';
 
 type RequestHandlerChainParams = {
@@ -41,6 +44,7 @@ type RequestHandlerChainParams = {
   bindDevice: BindDeviceRuntime;
   inspectFacts: InspectDeviceRuntimeFacts;
   bindExactDevice: BindExactDeviceRuntime;
+  getCloseShutdown?: () => Promise<DeviceShutdownCloseCapability>;
   reconcileOrphanedDeviceClaim: DeviceClaimReconciler;
   appLogAdmissionLedger?: AppLogAdmissionLedger;
   screenRecordingAdmissionLedger: ScreenRecordingAdmissionLedger;
@@ -144,6 +148,7 @@ async function runSessionHandler(
       bindDevice: params.bindDevice,
       inspectFacts: params.inspectFacts,
       bindExactDevice: params.bindExactDevice,
+      getCloseShutdown: params.getCloseShutdown,
       reconcileOrphanedDeviceClaim: params.reconcileOrphanedDeviceClaim,
       appLogAdmissionLedger: params.appLogAdmissionLedger,
       screenRecordingAdmissionLedger: params.screenRecordingAdmissionLedger,

@@ -154,6 +154,14 @@ export function createComposedPlatformRuntimeGateway(options: {
       }
       return await bindAndValidate(await loadLocal(request.device.platform), request);
     },
+    getCloseShutdown: async () => {
+      const host = await loadHost();
+      const capability = host.deviceShutdown.close;
+      if (!capability) {
+        throw runtimeContractError('Platform runtime close shutdown capability is unavailable');
+      }
+      return capability;
+    },
     shutdown: async () => {
       await Promise.allSettled(
         [...loadedOwners.values()].map(async (owner) => await owner.shutdown()),

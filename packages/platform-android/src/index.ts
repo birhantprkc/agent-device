@@ -4,6 +4,7 @@ import type {
   InventoryPlatformModule,
   PlatformRuntimeModule,
   PlatformModuleMetadata,
+  DeviceShutdownRuntimeDependencies,
 } from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import type { AndroidInventoryConfig } from './inventory-config.ts';
@@ -55,4 +56,12 @@ export function createAndroidInventoryModule(
       return createAndroidInventory(host, capturedConfig);
     },
   });
+}
+
+/** Loads Android shutdown mechanics only when the neutral shutdown capability is exercised. */
+export async function loadShutdownRuntime(
+  dependencies: Pick<DeviceShutdownRuntimeDependencies, 'commands'>,
+) {
+  const { createAndroidShutdownRuntime } = await import('./shutdown/runtime.ts');
+  return createAndroidShutdownRuntime(dependencies);
 }

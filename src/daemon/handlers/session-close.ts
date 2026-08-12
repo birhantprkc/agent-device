@@ -41,6 +41,7 @@ import {
   type SessionCleanupFailure,
 } from '../session-teardown.ts';
 import { clearDeviceClaim } from '../device-claims.ts';
+import type { DeviceShutdownCloseCapability } from '@agent-device/contracts/platform';
 import {
   buildRetriableRepairCloseFailureResponse,
   commitRepairScriptBeforeClose,
@@ -50,12 +51,14 @@ import {
 async function maybeShutdownSessionTarget(params: {
   device: DeviceInfo;
   shutdownRequested: boolean | undefined;
+  getCloseShutdown?: () => Promise<DeviceShutdownCloseCapability>;
 }): Promise<TargetShutdownResult | undefined> {
-  const { device, shutdownRequested } = params;
+  const { device, shutdownRequested, getCloseShutdown } = params;
   if (!shutdownRequested) return undefined;
   if (isActiveProviderDevice(device)) return undefined;
-  if (!canShutdownSessionTarget(device)) return undefined;
-  return await shutdownSessionTarget(device);
+  const capability = getCloseShutdown ? await getCloseShutdown() : undefined;
+  if (!(await canShutdownSessionTarget(capability, device)) || !capability) return undefined;
+  return await shutdownSessionTarget(capability, device);
 }
 
 function shouldRetainAppleRunnerAfterClose(req: DaemonRequest, session: SessionState): boolean {
@@ -330,8 +333,17 @@ export async function handleCloseCommand(params: {
   sessionStore: SessionStore;
   leaseRegistry: LeaseRegistry;
   leaseLifecycleProvider?: LeaseLifecycleProvider;
+  getCloseShutdown?: () => Promise<DeviceShutdownCloseCapability>;
 }): Promise<DaemonResponse> {
-  const { req, sessionName, logPath, sessionStore, leaseRegistry, leaseLifecycleProvider } = params;
+  const {
+    req,
+    sessionName,
+    logPath,
+    sessionStore,
+    leaseRegistry,
+    leaseLifecycleProvider,
+    getCloseShutdown,
+  } = params;
   const session = sessionStore.get(sessionName);
   if (!session) {
     return await closeWithoutSession(req, logPath);
@@ -356,6 +368,7 @@ export async function handleCloseCommand(params: {
   const shutdownResult = await maybeShutdownSessionTarget({
     device: session.device,
     shutdownRequested: req.flags?.shutdown,
+    getCloseShutdown,
   });
   return buildCloseSuccessResponse({
     session,

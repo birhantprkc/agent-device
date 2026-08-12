@@ -1,5 +1,6 @@
 import type {
   AppLogSessionArtifacts,
+  DeviceShutdownRuntimeLoaders,
   HostCommandRequest,
   PlatformRuntimeHost,
 } from '@agent-device/contracts/platform';
@@ -22,9 +23,11 @@ import { createDeviceShutdownRuntimeHost } from './platform-runtime-device-shutd
 export function createPlatformRuntimeHost(options: {
   sessionsDir: string;
   resolveSessionArtifacts(sessionId: string): AppLogSessionArtifacts;
+  shutdownLoaders: DeviceShutdownRuntimeLoaders;
 }): PlatformRuntimeHost {
   const processes = createManagedAppLogProcesses(options.sessionsDir);
   const localProcessTransport = Object.freeze({ mode: 'local' as const, start: processes.start });
+  const appleTools = createAppleToolHost();
   const commands = Object.freeze({
     which: async (executable: string) => ((await whichCmd(executable)) ? executable : undefined),
     run: async (request: HostCommandRequest, signal?: AbortSignal) => {
@@ -50,7 +53,7 @@ export function createPlatformRuntimeHost(options: {
   });
   return Object.freeze({
     commands,
-    appleTools: createAppleToolHost(),
+    appleTools,
     toolchains: createHostToolchainPreparer(),
     artifacts: Object.freeze({ resolveSession: options.resolveSessionArtifacts }),
     outputs: Object.freeze({
@@ -74,12 +77,15 @@ export function createPlatformRuntimeHost(options: {
     ...network,
     appInventory: createAppInventoryRuntimeHost(),
     appState: createAppStateRuntimeHost(),
-    deviceShutdown: createDeviceShutdownRuntimeHost(),
     deviceReadiness: Object.freeze({
       applePhysical: createApplePhysicalReadinessHost(),
       appleAutomation: createAppleAutomationKeepHotHost(),
       androidEmulator: createAndroidEmulatorHost(),
     }),
+    deviceShutdown: createDeviceShutdownRuntimeHost(
+      { appleTools, commands },
+      options.shutdownLoaders,
+    ),
     screenRecording: createScreenRecordingRuntimeHost(),
     clock: Object.freeze({
       now: () => Date.now(),

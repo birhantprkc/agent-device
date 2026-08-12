@@ -41,6 +41,7 @@ import {
 import type { DaemonRequest, DaemonResponse, SessionState } from './types.ts';
 import { teardownSessionResources } from './session-teardown.ts';
 import type {
+  DeviceShutdownCloseCapability,
   DeviceRuntimeGateway,
   PlatformRuntimeOperations,
   PlatformRequestScope,
@@ -73,6 +74,7 @@ export type RequestExecutionScope = AsyncDisposable & {
   bindDevice: BindDeviceRuntime;
   inspectFacts: InspectDeviceRuntimeFacts;
   bindExactDevice: BindExactDeviceRuntime;
+  getCloseShutdown: () => Promise<DeviceShutdownCloseCapability>;
   throwIfCanceled(): void;
 };
 
@@ -85,6 +87,7 @@ export type LockedRequestScope = {
   bindDevice: BindDeviceRuntime;
   inspectFacts: InspectDeviceRuntimeFacts;
   bindExactDevice: BindExactDeviceRuntime;
+  getCloseShutdown: () => Promise<DeviceShutdownCloseCapability>;
   throwIfCanceled(): void;
   contextFromFlags(
     flags: CommandFlags | undefined,
@@ -199,6 +202,15 @@ export async function createRequestExecutionScope(params: {
           throw new AppError(
             'COMMAND_FAILED',
             'Device runtime gateway is not configured for this request scope',
+            { reason: 'runtime-gateway-missing' },
+          );
+        }),
+      getCloseShutdown:
+        params.deviceRuntimeGateway?.getCloseShutdown ??
+        (async () => {
+          throw new AppError(
+            'COMMAND_FAILED',
+            'Device runtime close capability is not configured for this request scope',
             { reason: 'runtime-gateway-missing' },
           );
         }),
@@ -362,6 +374,7 @@ export function prepareLockedRequestScope(params: {
       bindDevice: scope.bindDevice,
       inspectFacts: scope.inspectFacts,
       bindExactDevice: scope.bindExactDevice,
+      getCloseShutdown: scope.getCloseShutdown,
       throwIfCanceled: scope.throwIfCanceled,
       contextFromFlags,
       handlerContextFromFlags: (flags, appBundleId, traceLogPath) =>

@@ -140,6 +140,10 @@ export type DeviceBindingRequest = Readonly<{
 export type DeviceRuntimeGateway<Operations extends object> = Readonly<{
   inspectFacts(device: DeviceInfo): Promise<RuntimeFacts<Operations>>;
   bind(request: DeviceBindingRequest): Promise<DeviceBinding<Operations>>;
+  /** Complete close compatibility capability; unlike bind, this never admits a runtime facet. */
+  getCloseShutdown?: () => Promise<
+    import('./device-shutdown-runtime.ts').DeviceShutdownCloseCapability
+  >;
   shutdown(): Promise<void>;
 }>;
 

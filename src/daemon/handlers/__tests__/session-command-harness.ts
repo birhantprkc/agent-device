@@ -5,6 +5,7 @@ import {
 import {
   localRuntimeOwner,
   narrowDeviceBinding,
+  type DeviceShutdownCloseCapability,
   type DeviceBinding,
   type EnsureReadyInput,
   type PlatformRuntimeOperations,
@@ -32,6 +33,19 @@ export const mockEnsureReadyHeadlessRuntime = vi.fn(
 export const mockShutdownTargetRuntime = vi.fn(
   async (): Promise<TargetShutdownResult | undefined> => undefined,
 );
+export const mockCloseShutdownTarget = vi.fn(
+  async (_device: DeviceInfo): Promise<TargetShutdownResult | undefined> => undefined,
+);
+const mockCloseShutdownCapability: DeviceShutdownCloseCapability = Object.freeze({
+  canShutdownTarget: async (device) => isShutdownDevice(device),
+  shutdownTarget: async (device) =>
+    (await mockCloseShutdownTarget(device)) ?? {
+      success: true,
+      exitCode: 0,
+      stdout: '',
+      stderr: '',
+    },
+});
 export const mockBindDeviceRuntime = vi.fn(async (device: DeviceInfo, use) =>
   narrowDeviceBinding(readinessBinding(device), use),
 );
@@ -41,6 +55,7 @@ beforeEach(() => {
   mockEnsureReadyRuntime.mockClear();
   mockEnsureReadyHeadlessRuntime.mockClear();
   mockShutdownTargetRuntime.mockClear();
+  mockCloseShutdownTarget.mockClear();
   mockBindDeviceRuntime.mockClear();
 });
 
@@ -52,6 +67,7 @@ export function handleSessionCommands(
     ...params,
     inspectFacts: params.inspectFacts ?? mockInspectDeviceRuntimeFacts,
     bindDevice: params.bindDevice ?? mockBindDeviceRuntime,
+    getCloseShutdown: params.getCloseShutdown ?? (async () => mockCloseShutdownCapability),
     reconcileOrphanedDeviceClaim: async () => ({
       status: 'retained',
       reason: 'test-harness-has-no-exact-owner-recovery',

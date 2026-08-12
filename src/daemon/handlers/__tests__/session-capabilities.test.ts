@@ -444,6 +444,7 @@ test('capabilities accepts a stopped Android AVD placeholder for explicit platfo
   const runtime = createAdmissionRuntime({
     appLogAvailable: false,
     networkAvailable: false,
+    appsAvailable: false,
     providerMode: 'local',
   });
 

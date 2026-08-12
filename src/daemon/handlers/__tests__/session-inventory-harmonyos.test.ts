@@ -54,6 +54,7 @@ function runtimeFacts(): RuntimeFacts<PlatformRuntimeOperations> {
       ensureReady: available,
       bootTarget: unavailable,
       bootTargetHeadless: unavailable,
+      shutdownTarget: unavailable,
     },
   };
 }

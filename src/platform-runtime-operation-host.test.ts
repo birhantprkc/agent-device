@@ -17,6 +17,17 @@ vi.mock('./platform-runtime-toolchain-host.ts', () => ({
 
 import { createPlatformRuntimeHost } from './platform-runtime-operation-host.ts';
 
+const shutdownLoaders = {
+  apple: async () => ({
+    canShutdownTarget: () => true,
+    shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+  }),
+  android: async () => ({
+    canShutdownTarget: () => true,
+    shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
+  }),
+};
+
 test('operation host composes the shared lazy Apple-tool and toolchain capabilities', () => {
   const host = createPlatformRuntimeHost({
     sessionsDir: '/tmp/sessions',
@@ -24,6 +35,7 @@ test('operation host composes the shared lazy Apple-tool and toolchain capabilit
       outputPath: '/tmp/sessions/one/app.log',
       pidPath: '/tmp/sessions/one/app-log.pid',
     }),
+    shutdownLoaders,
   });
 
   expect(host.appleTools).toBe(capabilities.appleTools);
