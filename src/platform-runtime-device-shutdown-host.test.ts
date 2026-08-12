@@ -45,6 +45,7 @@ test('shutdown runtime treats an already-stopped target as success without nativ
 
 test('shutdown runtime preserves iOS Shutdown final-state parity', async () => {
   const device = appleDevice();
+  const controller = new AbortController();
   mockShutdownSimulator.mockResolvedValue({
     success: false,
     exitCode: 149,
@@ -53,13 +54,14 @@ test('shutdown runtime preserves iOS Shutdown final-state parity', async () => {
   });
   mockGetSimulatorState.mockResolvedValue('Shutdown');
 
-  await expect(shutdownHost().apple.shutdownTarget(device, signal())).resolves.toEqual({
+  await expect(shutdownHost().apple.shutdownTarget(device, controller.signal)).resolves.toEqual({
     success: true,
     exitCode: 0,
     stdout: '',
     stderr: 'Unable to shutdown device in current state: Shutdown',
   });
   expect(mockGetSimulatorState).toHaveBeenCalledWith(device);
+  expect(mockShutdownSimulator).toHaveBeenCalledWith(device, controller.signal);
 });
 
 test('shutdown runtime preserves iOS failure when final-state inspection fails', async () => {

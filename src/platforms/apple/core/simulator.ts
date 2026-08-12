@@ -205,7 +205,10 @@ export async function ensureBootedSimulator(
   await openIosSimulatorApp({ deviceHub: options.deviceHub });
 }
 
-export async function shutdownSimulator(device: DeviceInfo): Promise<{
+export async function shutdownSimulator(
+  device: DeviceInfo,
+  signal?: AbortSignal,
+): Promise<{
   success: boolean;
   exitCode: number;
   stdout: string;
@@ -213,7 +216,7 @@ export async function shutdownSimulator(device: DeviceInfo): Promise<{
 }> {
   clearSimulatorBootedMemo(device);
   const args = buildSimctlArgsForDevice(device, ['shutdown', device.id]);
-  const result = await runXcrun(args, { allowFailure: true, timeoutMs: 15_000 });
+  const result = await runXcrun(args, { allowFailure: true, timeoutMs: 15_000, signal });
   return {
     success: result.exitCode === 0,
     exitCode: result.exitCode,

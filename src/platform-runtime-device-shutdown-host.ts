@@ -72,7 +72,7 @@ async function shutdownIosSimulator(
 ): Promise<TargetShutdownResult> {
   const { getSimulatorState, shutdownSimulator } =
     await import('./platforms/apple/core/simulator.ts');
-  const result = await shutdownSimulator(device);
+  const result = await shutdownSimulator(device, signal);
   signal.throwIfAborted();
   if (result.success) return result;
 

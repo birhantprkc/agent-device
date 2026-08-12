@@ -70,6 +70,17 @@ test('shutdownSimulator invalidates the booted memo', async () => {
   expect(countSimctlListCalls()).toBe(2);
 });
 
+test('shutdownSimulator forwards cancellation to the native simctl command', async () => {
+  const controller = new AbortController();
+
+  await shutdownSimulator(simulator, controller.signal);
+
+  expect(mockRunXcrun).toHaveBeenCalledWith(
+    ['simctl', 'shutdown', simulator.id],
+    expect.objectContaining({ signal: controller.signal }),
+  );
+});
+
 test('markSimulatorBooted seeds the memo so the first boot check skips the listing', async () => {
   markSimulatorBooted(simulator);
 
