@@ -189,9 +189,10 @@ function assertCommandSuccess(
   message: string,
 ): void {
   if (result.exitCode === 0) return;
-  throw new AppError('COMMAND_FAILED', message, {
+  const details = {
     stdout: result.stdout,
     stderr: result.stderr,
     exitCode: result.exitCode,
-  });
+  };
+  throw new AppError('COMMAND_FAILED', message, details);
 }

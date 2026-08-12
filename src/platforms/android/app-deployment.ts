@@ -5,41 +5,10 @@ import { AppError } from '@agent-device/kernel/errors';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { resolveFileOverridePath, runCmd, whichCmd } from '../../utils/exec.ts';
 import { waitForAndroidBoot } from './emulator-lifecycle.ts';
-import { runAndroidAdb } from './adb.ts';
-import {
-  androidAdbResultError,
-  installAndroidAdbPackage,
-  resolveAndroidAdbProvider,
-} from './adb-executor.ts';
-import {
-  resolveAndroidApp,
-  withAndroidAppResolutionCacheInvalidated,
-} from './app-deployment-resolution.ts';
+import { installAndroidAdbPackage, resolveAndroidAdbProvider } from './adb-executor.ts';
+import { withAndroidAppResolutionCacheInvalidated } from './app-deployment-resolution.ts';
 
 type AndroidDeploymentSignalOptions = Readonly<{ signal?: AbortSignal }>;
-
-/** Removes an installed package after resolving aliases and fuzzy application names. */
-export async function uninstallAndroidApp(
-  device: DeviceInfo,
-  app: string,
-  options: AndroidDeploymentSignalOptions = {},
-): Promise<{ package: string }> {
-  const resolved = await resolveAndroidApp(device, app);
-  if (resolved.type === 'intent') {
-    throw new AppError('INVALID_ARGS', 'App uninstall requires a package name, not an intent');
-  }
-  const result = await runAndroidAdb(device, ['uninstall', resolved.value], {
-    allowFailure: true,
-    signal: options.signal,
-  });
-  if (result.exitCode !== 0) {
-    const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
-    if (!output.includes('unknown package') && !output.includes('not installed')) {
-      throw androidAdbResultError(`adb uninstall failed for ${resolved.value}`, result);
-    }
-  }
-  return { package: resolved.value };
-}
 
 type BundletoolInvocation =
   | { cmd: 'bundletool'; prefixArgs: readonly string[] }
@@ -131,32 +100,6 @@ async function installAndroidAppFiles(
   });
 }
 
-async function listInstalledAndroidPackages(
-  device: DeviceInfo,
-  options: AndroidDeploymentSignalOptions = {},
-): Promise<Set<string>> {
-  const result = await runAndroidAdb(device, ['shell', 'pm', 'list', 'packages'], {
-    signal: options.signal,
-  });
-  return new Set(
-    result.stdout
-      .split('\n')
-      .map((line: string) => line.replace('package:', '').trim())
-      .filter(Boolean),
-  );
-}
-
-async function resolveInstalledAndroidPackageName(
-  device: DeviceInfo,
-  beforePackages: Set<string>,
-  options: AndroidDeploymentSignalOptions = {},
-): Promise<string | undefined> {
-  const afterPackages = await listInstalledAndroidPackages(device, options);
-  const installedNow = Array.from(afterPackages).filter((pkg) => !beforePackages.has(pkg));
-  if (installedNow.length === 1) return installedNow[0];
-  return undefined;
-}
-
 /** Installs an APK/AAB behind one cache invalidation transaction. */
 export async function installAndroidInstallablePath(
   device: DeviceInfo,
@@ -169,23 +112,4 @@ export async function installAndroidInstallablePath(
     }
     await installAndroidAppFiles(device, installablePath, options);
   });
-}
-
-/** Installs an artifact and returns the new package identity when it can be observed. */
-export async function installAndroidInstallablePathAndResolvePackageName(
-  device: DeviceInfo,
-  installablePath: string,
-  packageNameHint?: string,
-  options: AndroidDeploymentSignalOptions = {},
-): Promise<string | undefined> {
-  const beforePackages = packageNameHint
-    ? undefined
-    : await listInstalledAndroidPackages(device, options);
-  await installAndroidInstallablePath(device, installablePath, options);
-  return (
-    packageNameHint ??
-    (beforePackages
-      ? await resolveInstalledAndroidPackageName(device, beforePackages, options)
-      : undefined)
-  );
 }
