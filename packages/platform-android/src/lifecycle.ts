@@ -74,9 +74,10 @@ export function bindAndroidApplicationLifecycle(
         stateDir: input.stateDir,
         sessionName: input.sessionName,
       });
-      const shutdown = input.shutdownTarget
-        ? await host.deviceShutdown.android.shutdownTarget(device, signal)
-        : undefined;
+      const shutdown =
+        input.shutdownTarget && device.kind === 'emulator'
+          ? await host.deviceShutdown.android.shutdownTarget(device, signal)
+          : undefined;
       return shutdown === undefined ? {} : { shutdown };
     },
     prepareAppleRunner: unavailable,

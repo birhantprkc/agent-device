@@ -121,8 +121,6 @@ const supportsCoreDevicePhysicalOperation = (device: DeviceInfo): boolean =>
   device.platform !== 'apple' ||
   device.kind !== 'device' ||
   device.iosPhysicalDeviceBackend !== 'xctest';
-const supportsAppInstallation = (device: DeviceInfo): boolean =>
-  isNotMacOs(device) && supportsCoreDevicePhysicalOperation(device);
 const coreDeviceOnlyPhysicalOperationHint = (device: DeviceInfo): string | undefined =>
   supportsCoreDevicePhysicalOperation(device)
     ? undefined
@@ -131,11 +129,7 @@ const coreDeviceOnlyPhysicalOperationHint = (device: DeviceInfo): string | undef
 // end-to-end assertions cross-check this map against production: a command that
 // gains/loses a closure (or whose closure body changes) breaks parity.
 const SUPPORTS_REF: Record<string, (device: DeviceInfo) => boolean> = {
-  install: supportsAppInstallation,
-  reinstall: supportsAppInstallation,
-  'install-from-source': supportsAppInstallation,
   perf: supportsCoreDevicePhysicalOperation,
-  push: isNotMacOs,
   home: isNotMacOs,
   'app-switcher': isNotMacOs,
   clipboard: (device) =>
@@ -157,9 +151,6 @@ const HINT_REF: Record<string, (device: DeviceInfo) => string | undefined> = {
     device.platform === 'apple'
       ? 'viewport resizes web targets only (--platform web). Apple screen geometry is fixed by the selected simulator or device type — open a different simulator to test another screen size.'
       : undefined,
-  install: coreDeviceOnlyPhysicalOperationHint,
-  reinstall: coreDeviceOnlyPhysicalOperationHint,
-  'install-from-source': coreDeviceOnlyPhysicalOperationHint,
   perf: coreDeviceOnlyPhysicalOperationHint,
   'tv-remote': (device) => {
     if (device.platform === 'android') {
@@ -196,12 +187,10 @@ const HARMONYOS_SUPPORTED_COMMANDS_REF = new Set([
   'get',
   'home',
   'gesture',
-  'install',
   'keyboard',
   'is',
   'longpress',
   'press',
-  'reinstall',
   'screenshot',
   'scroll',
   'settings',
@@ -288,13 +277,11 @@ test('HarmonyOS static capabilities omit runtime-backed command admissions', () 
     'gesture',
     'get',
     'home',
-    'install',
     'is',
     'keyboard',
     'longpress',
     'perf',
     'press',
-    'reinstall',
     'screenshot',
     'scroll',
     'settings',

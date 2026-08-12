@@ -89,7 +89,7 @@ const headlessUnavailable = Object.freeze({
 } as const);
 const liveSessionUnavailable = Object.freeze({
   available: false,
-  reason: 'unsupported-provider-mode',
+  reason: 'owner-capability-missing',
   hint: 'Limrun requires a matching live provider session for this device.',
 } as const);
 const prepareUnavailable = Object.freeze({

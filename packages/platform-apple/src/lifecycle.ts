@@ -289,9 +289,10 @@ async function finalizeAppleApplicationClose(
     await host.appleApplications.stopRunnerSession(device.id);
     await host.appleApplications.dismissCloseAlerts(device, input).catch(() => {});
   }
-  const shutdown = input.shutdownTarget
-    ? await host.deviceShutdown.apple.shutdownTarget(device, signal)
-    : undefined;
+  const shutdown =
+    input.shutdownTarget && isIosSimulator(device)
+      ? await host.deviceShutdown.apple.shutdownTarget(device, signal)
+      : undefined;
   return shutdown === undefined ? {} : { shutdown };
 }
 

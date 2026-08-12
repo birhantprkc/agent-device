@@ -37,6 +37,7 @@ import {
 } from '@agent-device/contracts/platform';
 import { ensureAppsRuntimeReady, listAppsFromRuntime } from '../apps-runtime.ts';
 import type { BindDeviceRuntime, InspectDeviceRuntimeFacts } from '../request-runtime-binding.ts';
+import { installFamilyCapabilityAvailable } from './session-install-capability-projection.ts';
 
 export async function handleSessionInventoryCommands(params: {
   req: DaemonRequest;
@@ -223,6 +224,8 @@ async function capabilitiesInventoryResponse(params: {
         // A session that already owns an app identity answers appstate itself, so it stays
         // available even when the sessionless runtime probe cannot see a foreground app.
         if (command === 'appstate' && sessionOwnedAppStateAvailable) return true;
+        const installFamilyAvailable = installFamilyCapabilityAvailable(command, facts);
+        if (installFamilyAvailable !== undefined) return installFamilyAvailable;
         const factOwned = factOwnedCapabilityAvailable(command, facts);
         if (factOwned !== undefined) return factOwned;
         return command === 'logs'

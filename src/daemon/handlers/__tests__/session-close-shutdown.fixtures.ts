@@ -53,6 +53,7 @@ import {
   handleSessionCommands,
   mockBindDeviceRuntime,
   mockInspectDeviceRuntimeFacts,
+  mockShutdownTargetRuntime,
 } from './session-command-harness.ts';
 import { teardownSessionResources } from '../../session-teardown.ts';
 import { LeaseRegistry } from '../../lease-registry.ts';
@@ -239,6 +240,7 @@ export const sessionCloseShutdownFixture = Object.freeze({
   mockCleanupAppleXctracePerfCapture,
   mockDispatchCommand,
   mockInspectDeviceRuntimeFacts,
+  mockShutdownTargetRuntime,
   mockRunCmd,
   mockShutdownSimulator,
   mockStopAndroidSnapshotHelperSessionForDevice,

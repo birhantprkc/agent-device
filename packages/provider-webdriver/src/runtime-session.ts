@@ -209,6 +209,7 @@ export class WebDriverSessionManager {
   private deviceForLease(lease: DeviceLease, prepared: CloudWebDriverPreparedSession): DeviceInfo {
     return {
       ...deviceFieldsFromPublicPlatform(prepared.platform),
+      ...(prepared.platform === 'ios' ? { appleOs: 'ios' as const } : {}),
       id:
         prepared.deviceId ??
         this.options.deviceId?.(lease) ??

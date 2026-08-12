@@ -19,6 +19,8 @@ import {
   invokeApplicationOpen,
   providerRuntimeOwner,
   sameRuntimeOwner,
+  type AppDeploymentInput,
+  type AppDeploymentResult,
   type ApplicationLifecycleRuntimeOperations,
   type DeviceBinding,
   type DeviceBindingRequest,
@@ -138,10 +140,17 @@ async function bindProviderScenarioPlatformRuntime(
     device: request.device,
     owner,
     facts,
-    operations: availableApplicationLifecycleOperations(
-      providerScenarioApplicationLifecycle(runtime, request.device, request.scope.signal),
-      facts.operations,
-    ),
+    operations: Object.freeze({
+      ...availableApplicationLifecycleOperations(
+        providerScenarioApplicationLifecycle(runtime, request.device, request.scope.signal),
+        facts.operations,
+      ),
+      deployApp: async (input: AppDeploymentInput): Promise<AppDeploymentResult> => {
+        const result = await runtime.installApp?.(request.device, input.app, input.appPath);
+        if (result) return result;
+        throw new AppError('UNSUPPORTED_OPERATION', 'Fake provider install is unavailable');
+      },
+    }),
     [Symbol.asyncDispose]: async () => undefined,
   });
 }
@@ -220,6 +229,7 @@ function providerScenarioRuntimeFacts(
       bootTargetHeadless: fakeProviderUnavailable,
       listApps: fakeProviderUnavailable,
       ...unavailableDeploymentAndShutdownOperationFacts,
+      deployApp: runtime.installApp ? fakeProviderAvailable : fakeProviderUnavailable,
       ...applicationLifecycleOperationFacts({
         resolveOpenTarget: fakeProviderAvailable,
         prepareApplicationOpen: fakeProviderAvailable,

@@ -7,6 +7,7 @@ import type {
 } from '@agent-device/contracts/platform';
 import type { Interactor, RunnerContext } from '@agent-device/contracts/interaction';
 import type { DeviceInfo } from '@agent-device/kernel/device';
+import type { TargetShutdownResult } from '@agent-device/contracts/device';
 import { vi } from 'vitest';
 import { createAndroidApplicationTools } from '../../platform-runtime-android-application-tools.ts';
 import { createAppleApplicationTools } from '../../platform-runtime-apple-application-tools.ts';
@@ -63,10 +64,16 @@ export const dispatchApplicationLifecycleEffect = vi.fn(
 export async function applicationLifecycleRuntimeFixture(
   device: DeviceInfo,
   signal: AbortSignal = new AbortController().signal,
+  shutdownTarget: (device: DeviceInfo) => Promise<TargetShutdownResult> = async () => ({
+    success: true,
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+  }),
 ): Promise<ApplicationLifecycleRuntimeOperations> {
   const gateway = createComposedPlatformRuntimeGateway({
     modules: platformRuntimeModules,
-    loadHost: async () => fixtureHost(device),
+    loadHost: async () => fixtureHost(device, shutdownTarget),
   });
   const binding = await gateway.bind({
     device,
@@ -100,7 +107,10 @@ function lifecycleOperations(
   return Object.freeze(selected) as ApplicationLifecycleRuntimeOperations;
 }
 
-function fixtureHost(readyDevice: DeviceInfo): PlatformRuntimeHost {
+function fixtureHost(
+  readyDevice: DeviceInfo,
+  shutdownTarget: (device: DeviceInfo) => Promise<TargetShutdownResult>,
+): PlatformRuntimeHost {
   let simulatorState = readyDevice.booted === false ? 'Shutdown' : 'Booted';
   const localInteractors = Object.freeze({
     resolve: async (device: DeviceInfo, runner: RunnerContext): Promise<Interactor> =>
@@ -110,6 +120,20 @@ function fixtureHost(readyDevice: DeviceInfo): PlatformRuntimeHost {
     localInteractors,
     appleApplications: createAppleApplicationTools(),
     androidApplications: createAndroidApplicationTools(),
+    deviceShutdown: Object.freeze({
+      apple: Object.freeze({
+        shutdownTarget: async (device: DeviceInfo) => await shutdownTarget(device),
+      }),
+      android: Object.freeze({
+        shutdownTarget: async (device: DeviceInfo) => await shutdownTarget(device),
+      }),
+      close: Object.freeze({
+        canShutdownTarget: async (device: DeviceInfo) =>
+          (device.platform === 'apple' && device.kind === 'simulator') ||
+          (device.platform === 'android' && device.kind === 'emulator'),
+        shutdownTarget: async (device: DeviceInfo) => await shutdownTarget(device),
+      }),
+    }),
     // Readiness is package-owned; these handler fixtures exercise lifecycle dispatch, so the
     // narrow ports report an already-ready device instead of booting anything.
     deviceReadiness: Object.freeze({

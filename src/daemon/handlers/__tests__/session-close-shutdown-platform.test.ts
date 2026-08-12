@@ -6,15 +6,13 @@ import {
 } from './session-close-shutdown.fixtures.ts';
 
 const {
-  AppError,
   handleSessionCommands,
   lifecycleRuntimeFacts,
   makeSession,
   makeSessionStore,
   mockBindDeviceRuntime,
   mockInspectDeviceRuntimeFacts,
-  mockRunCmd,
-  mockShutdownSimulator,
+  mockShutdownTargetRuntime,
   narrowDeviceBinding,
   noopInvoke,
   os,
@@ -65,10 +63,11 @@ test('close --shutdown calls shutdownSimulator for iOS simulator and includes re
     }),
   );
 
-  const shutdownCalls: string[] = [];
-  mockShutdownSimulator.mockImplementation(async (device) => {
-    shutdownCalls.push(device.id);
-    return { success: true, exitCode: 0, stdout: '', stderr: '' };
+  mockShutdownTargetRuntime.mockResolvedValue({
+    success: true,
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
   });
 
   const response = await handleSessionCommands({
@@ -89,7 +88,7 @@ test('close --shutdown calls shutdownSimulator for iOS simulator and includes re
   expect(response?.ok).toBe(true);
   expect(mockInspectDeviceRuntimeFacts).toHaveBeenCalledTimes(1);
   expect(mockBindDeviceRuntime).toHaveBeenCalledTimes(1);
-  expect(shutdownCalls).toEqual(['sim-udid-1']);
+  expect(mockShutdownTargetRuntime).toHaveBeenCalledTimes(1);
   expect(sessionStore.get(sessionName)).toBeUndefined();
   if (response && response.ok) {
     expect(response.data?.session).toBe(sessionName);
@@ -151,7 +150,7 @@ test('close --shutdown keeps a selected provider-owned iOS simulator off local s
   });
 
   expect(response?.ok).toBe(true);
-  expect(mockShutdownSimulator).not.toHaveBeenCalled();
+  expect(mockShutdownTargetRuntime).not.toHaveBeenCalled();
   expect(providerClose).not.toHaveBeenCalled();
   expect(providerFinalize).toHaveBeenCalledWith(expect.objectContaining({ shutdownTarget: true }));
   if (response?.ok) expect(response.data?.shutdown).toBeUndefined();
@@ -171,7 +170,12 @@ test('close --shutdown calls shutdownAndroidEmulator for Android emulator and in
     }),
   );
 
-  mockRunCmd.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+  mockShutdownTargetRuntime.mockResolvedValue({
+    success: true,
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+  });
 
   const response = await handleSessionCommands({
     req: {
@@ -189,11 +193,7 @@ test('close --shutdown calls shutdownAndroidEmulator for Android emulator and in
 
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(true);
-  expect(mockRunCmd).toHaveBeenCalledWith(
-    'adb',
-    ['-s', 'emulator-5554', 'emu', 'kill'],
-    expect.objectContaining({ allowFailure: true }),
-  );
+  expect(mockShutdownTargetRuntime).toHaveBeenCalledTimes(1);
   expect(sessionStore.get(sessionName)).toBeUndefined();
   if (response && response.ok) {
     expect(response.data?.session).toBe(sessionName);
@@ -236,7 +236,7 @@ test('close --shutdown is ignored for non-simulator iOS devices', async () => {
 
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(true);
-  expect(mockShutdownSimulator).not.toHaveBeenCalled();
+  expect(mockShutdownTargetRuntime).not.toHaveBeenCalled();
   expect(sessionStore.get(sessionName)).toBeUndefined();
   if (response && response.ok) {
     expect(response.data?.session).toBe(sessionName);
@@ -274,7 +274,7 @@ test('close --shutdown is ignored for Android devices', async () => {
 
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(true);
-  expect(mockRunCmd).not.toHaveBeenCalled();
+  expect(mockShutdownTargetRuntime).not.toHaveBeenCalled();
   expect(sessionStore.get(sessionName)).toBeUndefined();
   if (response && response.ok) {
     expect(response.data?.session).toBe(sessionName);
@@ -296,7 +296,13 @@ test('close --shutdown returns success and failure payload when shutdownAndroidE
     }),
   );
 
-  mockRunCmd.mockRejectedValue(new AppError('COMMAND_FAILED', 'adb emu kill failed'));
+  mockShutdownTargetRuntime.mockResolvedValue({
+    success: false,
+    exitCode: -1,
+    stdout: '',
+    stderr: 'adb emu kill failed',
+    error: { code: 'COMMAND_FAILED', message: 'adb emu kill failed' },
+  });
 
   const response = await handleSessionCommands({
     req: {
@@ -330,7 +336,13 @@ test('close --shutdown returns success and failure payload when shutdownSimulato
     }),
   );
 
-  mockShutdownSimulator.mockRejectedValue(new AppError('COMMAND_FAILED', 'simctl shutdown failed'));
+  mockShutdownTargetRuntime.mockResolvedValue({
+    success: false,
+    exitCode: -1,
+    stdout: '',
+    stderr: 'simctl shutdown failed',
+    error: { code: 'COMMAND_FAILED', message: 'simctl shutdown failed' },
+  });
 
   const response = await handleSessionCommands({
     req: {

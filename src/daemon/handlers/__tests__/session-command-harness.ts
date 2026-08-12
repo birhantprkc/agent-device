@@ -39,7 +39,12 @@ export const mockEnsureReadyHeadlessRuntime = vi.fn(
   async (_input: EnsureReadyInput): Promise<DeviceInfo | undefined> => undefined,
 );
 export const mockShutdownTargetRuntime = vi.fn(
-  async (): Promise<TargetShutdownResult | undefined> => undefined,
+  async (): Promise<TargetShutdownResult> => ({
+    success: true,
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+  }),
 );
 export const mockDeployAppRuntime = vi.fn(
   async (_input: AppDeploymentInput): Promise<AppDeploymentResult> => ({}),
@@ -64,7 +69,13 @@ beforeEach(() => {
   mockInspectDeviceRuntimeFacts.mockClear();
   mockEnsureReadyRuntime.mockClear();
   mockEnsureReadyHeadlessRuntime.mockClear();
-  mockShutdownTargetRuntime.mockClear();
+  mockShutdownTargetRuntime.mockReset();
+  mockShutdownTargetRuntime.mockResolvedValue({
+    success: true,
+    exitCode: 0,
+    stdout: '',
+    stderr: '',
+  });
   mockDeployAppRuntime.mockReset();
   mockDeployAppRuntime.mockResolvedValue({});
   mockMaterializeAppSourceRuntime.mockReset();
@@ -150,7 +161,11 @@ async function readinessBinding(
   device: DeviceInfo,
 ): Promise<DeviceBinding<PlatformRuntimeOperations>> {
   const facts = readinessFacts(device);
-  const lifecycle = await applicationLifecycleRuntimeFixture(device);
+  const lifecycle = await applicationLifecycleRuntimeFixture(
+    device,
+    new AbortController().signal,
+    async () => await mockShutdownTargetRuntime(),
+  );
   return {
     device,
     owner: localRuntimeOwner(device.platform),
