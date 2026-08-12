@@ -53,6 +53,7 @@ export type HostTemporaryTextFile = AsyncDisposable &
   Readonly<{
     path: string;
     readText(): Promise<string>;
+    writeText(value: string): Promise<void>;
   }>;
 
 export type DeviceInventoryFileHost = Readonly<{

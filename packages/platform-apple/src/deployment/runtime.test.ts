@@ -43,6 +43,14 @@ function deploymentHost(
       which: async () => undefined,
       run: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
     },
+    temporaryFiles: {
+      create: async ({ suffix }: { suffix: string }) => ({
+        path: `/tmp/value${suffix}`,
+        readText: async () => '',
+        writeText: async () => {},
+        [Symbol.asyncDispose]: async () => {},
+      }),
+    },
     deviceReadiness: {
       applePhysical: { ensureConnected: async () => {} },
       appleAutomation: { keepHot: () => {}, markBooted: () => {} },

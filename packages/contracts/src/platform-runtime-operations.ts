@@ -95,6 +95,11 @@ export type PlatformRuntimeHost = AppLogRuntimeHost &
     /** Focused native ports; deployment semantics remain in the owning family packages. */
     appleDeployment: AppleAppDeploymentExecutor;
     androidDeployment: AndroidAppDeploymentExecutor;
+    temporaryFiles: Readonly<{
+      create(
+        options: Readonly<{ prefix: string; suffix: string }>,
+      ): Promise<import('./platform-runtime-host.ts').HostTemporaryTextFile>;
+    }>;
     screenRecording: ScreenRecordingRuntimeHost;
     deviceReadiness: DeviceReadinessRuntimeHost;
     deviceShutdown: DeviceShutdownRuntimeHost;

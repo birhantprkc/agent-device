@@ -1,8 +1,6 @@
 import type { PlatformRuntimeHost, PushNotificationInput } from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 export async function installAndroidArtifact(
@@ -96,7 +94,7 @@ async function installAndroidBundle(
   signal: AbortSignal,
 ): Promise<void> {
   const bundletool = await host.commands.which('bundletool');
-  const jar = process.env.AGENT_DEVICE_BUNDLETOOL_JAR?.trim();
+  const jar = host.androidDeployment.bundletoolJar;
   if (!bundletool && !jar) {
     throw new AppError(
       'TOOL_MISSING',
@@ -105,8 +103,11 @@ async function installAndroidBundle(
   }
   const executable = bundletool ? 'bundletool' : 'java';
   const prefix = bundletool ? [] : ['-jar', jar!];
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-device-aab-'));
-  const apksPath = path.join(tempDir, 'bundle.apks');
+  const apks = await host.temporaryFiles.create({
+    prefix: 'agent-device-aab-',
+    suffix: '.apks',
+  });
+  const apksPath = apks.path;
   try {
     assertCommandSuccess(
       await host.commands.run(
@@ -138,7 +139,7 @@ async function installAndroidBundle(
       'bundletool install-apks failed',
     );
   } finally {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await apks[Symbol.asyncDispose]();
   }
 }
 

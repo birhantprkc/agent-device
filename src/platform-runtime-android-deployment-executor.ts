@@ -9,6 +9,7 @@ import type {
  */
 export function createAndroidAppDeploymentExecutor(): AndroidAppDeploymentExecutor {
   return Object.freeze({
+    bundletoolJar: process.env.AGENT_DEVICE_BUNDLETOOL_JAR?.trim() || undefined,
     withInvalidatedAppResolutionCache: async (device, operation) => {
       const { withAndroidAppResolutionCacheInvalidated } =
         await import('./platforms/android/app-deployment-resolution.ts');

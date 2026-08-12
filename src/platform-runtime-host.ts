@@ -6,7 +6,7 @@ import type {
 } from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { constants } from 'node:fs';
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { createAppleToolHost } from './platform-runtime-apple-tool-host.ts';
@@ -65,7 +65,7 @@ async function isExecutable(candidate: string): Promise<boolean> {
   }
 }
 
-async function createTemporaryTextFile(
+export async function createTemporaryTextFile(
   options: Readonly<{
     prefix: string;
     suffix: string;
@@ -77,6 +77,7 @@ async function createTemporaryTextFile(
   return {
     path: filePath,
     readText: async () => await readFile(filePath, 'utf8'),
+    writeText: async (value: string) => await writeFile(filePath, value, 'utf8'),
     [Symbol.asyncDispose]: async () => {
       if (disposed) return;
       disposed = true;

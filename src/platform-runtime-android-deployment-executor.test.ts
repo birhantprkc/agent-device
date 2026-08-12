@@ -28,6 +28,7 @@ test('keeps root composition limited to artifact preparation and app identity re
   await expect(executor.resolveAppPackage(device, 'Example')).resolves.toBe('com.example.app');
   expect(resolveAndroidApp).toHaveBeenCalledWith(device, 'Example');
   expect(Object.keys(executor).sort()).toEqual([
+    'bundletoolJar',
     'prepareArtifact',
     'resolveAppPackage',
     'withInvalidatedAppResolutionCache',

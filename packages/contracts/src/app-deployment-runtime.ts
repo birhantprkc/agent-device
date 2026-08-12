@@ -80,6 +80,8 @@ export type AppleAppDeploymentExecutor = Readonly<{
  * supplies only the temporary legacy artifact and fuzzy-resolution seams.
  */
 export type AndroidAppDeploymentExecutor = Readonly<{
+  /** Inert composition-time configuration; command construction remains package-owned. */
+  bundletoolJar?: string;
   /** Brackets one deploy lifecycle so fuzzy target resolution is clear before and after it. */
   withInvalidatedAppResolutionCache<Result>(
     device: DeviceInfo,

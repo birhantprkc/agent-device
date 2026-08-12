@@ -10,9 +10,6 @@ import type {
 } from '@agent-device/contracts/platform';
 import { isIosFamily, type DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { ensureAppleReady } from '../readiness/runtime.ts';
 import { simctlArgs } from '../simulator-state.ts';
 
@@ -186,20 +183,22 @@ async function pushAppleNotification(
     throw new AppError('UNSUPPORTED_OPERATION', 'Apple push notifications require a simulator');
   }
   await ensureAppleReady(host, device, signal);
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-device-ios-push-'));
-  const payloadPath = path.join(tempDir, 'payload.apns');
+  const payload = await host.temporaryFiles.create({
+    prefix: 'agent-device-ios-push-',
+    suffix: '.apns',
+  });
   try {
-    await fs.writeFile(payloadPath, `${JSON.stringify(input.payload)}\n`, 'utf8');
+    await payload.writeText(`${JSON.stringify(input.payload)}\n`);
     const result = await host.appleTools.run(
       {
         tool: 'simctl',
-        args: simctlArgs(device, ['push', device.id, input.appId, payloadPath]),
+        args: simctlArgs(device, ['push', device.id, input.appId, payload.path]),
       },
       signal,
     );
     assertAppleToolSuccess(result, 'Apple push notification failed');
   } finally {
-    await fs.rm(tempDir, { recursive: true, force: true });
+    await payload[Symbol.asyncDispose]();
   }
 }
 

@@ -38,6 +38,7 @@ test('physical inventory prefers CoreDevice, supplements xctrace, and disposes i
     },
     createTemporaryTextFile: async () => ({
       path: '/tmp/devices.json',
+      writeText: async () => {},
       readText: async () =>
         JSON.stringify({
           result: {
@@ -102,6 +103,7 @@ test('physical inventory preserves request cancellation instead of failing soft'
     createTemporaryTextFile: async () => ({
       path: '/tmp/devices.json',
       readText: async () => '{}',
+      writeText: async () => {},
       [Symbol.asyncDispose]: async () => undefined,
     }),
   });
