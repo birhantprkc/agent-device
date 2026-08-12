@@ -1,21 +1,14 @@
 import type {
   AndroidAppDeploymentExecutor,
   MaterializeAppSourceInput,
-  PushNotificationInput,
 } from '@agent-device/contracts/platform';
 
 /**
- * Native Android executor port. The Android package owns deployment sequencing and cache scope;
- * this adapter supplies only lazy ADB/artifact mechanics.
+ * Temporary Android migration port. The package owns native command construction; this adapter
+ * retains only artifact preparation and fuzzy app resolution until those legacy owners move.
  */
 export function createAndroidAppDeploymentExecutor(): AndroidAppDeploymentExecutor {
   return Object.freeze({
-    ensureBooted: async (device, signal) => {
-      if (device.booted === true) return;
-      signal.throwIfAborted();
-      const { waitForAndroidBoot } = await import('./platforms/android/emulator-lifecycle.ts');
-      await waitForAndroidBoot(device.id, undefined, signal);
-    },
     withInvalidatedAppResolutionCache: async (device, operation) => {
       const { withAndroidAppResolutionCacheInvalidated } =
         await import('./platforms/android/app-deployment-resolution.ts');
@@ -26,29 +19,15 @@ export function createAndroidAppDeploymentExecutor(): AndroidAppDeploymentExecut
         await import('./platforms/android/install-artifact.ts');
       return await prepareAndroidInstallArtifact(input.source, options);
     },
-    install: async (device, installablePath, options) => {
-      const { installAndroidInstallablePathAndResolvePackageName } =
-        await import('./platforms/android/app-deployment.ts');
-      return await installAndroidInstallablePathAndResolvePackageName(
-        device,
-        installablePath,
-        options.packageNameHint,
-        { signal: options.signal },
-      );
-    },
-    uninstall: async (device, app, signal) => {
-      const { uninstallAndroidApp } = await import('./platforms/android/app-deployment.ts');
-      const result = await uninstallAndroidApp(device, app, { signal });
-      return { packageName: result.package };
-    },
-    appName: async (packageName) => {
-      const { inferAndroidAppName } =
+    resolveAppPackage: async (device, app) => {
+      const { resolveAndroidApp } =
         await import('./platforms/android/app-deployment-resolution.ts');
-      return inferAndroidAppName(packageName);
-    },
-    push: async (device, input: PushNotificationInput, signal) => {
-      const { pushAndroidNotification } = await import('./platforms/android/notifications.ts');
-      return await pushAndroidNotification(device, input.appId, input.payload, { signal });
+      const resolved = await resolveAndroidApp(device, app);
+      if (resolved.type === 'intent') {
+        const { AppError } = await import('@agent-device/kernel/errors');
+        throw new AppError('INVALID_ARGS', 'App uninstall requires a package name, not an intent');
+      }
+      return resolved.value;
     },
   });
 }

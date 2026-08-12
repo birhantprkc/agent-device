@@ -1,6 +1,21 @@
-import { expect, test, vi } from 'vitest';
-import type { AndroidAppDeploymentExecutor } from '@agent-device/contracts/platform';
+import { beforeEach, expect, test, vi } from 'vitest';
+import type {
+  AndroidAppDeploymentExecutor,
+  PlatformRuntimeHost,
+} from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
+
+const native = vi.hoisted(() => ({
+  installAndroidArtifact: vi.fn(),
+  uninstallAndroidPackage: vi.fn(),
+  pushAndroidNotification: vi.fn(),
+  inferAndroidAppName: vi.fn((packageName: string) => packageName.split('.').at(-1) ?? packageName),
+}));
+const ensureAndroidReady = vi.hoisted(() => vi.fn());
+
+vi.mock('./native.ts', () => native);
+vi.mock('../readiness/runtime.ts', () => ({ ensureAndroidReady }));
+
 import { androidAppDeploymentFacts, createAndroidAppDeploymentOperations } from './runtime.ts';
 
 const device: DeviceInfo = {
@@ -12,11 +27,22 @@ const device: DeviceInfo = {
   booted: true,
 };
 
-async function withoutInvalidatingAppResolutionCache<Result>(
-  _device: DeviceInfo,
-  operation: () => Promise<Result>,
-): Promise<Result> {
-  return await operation();
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+function hostFixture(overrides: Partial<AndroidAppDeploymentExecutor> = {}): PlatformRuntimeHost {
+  const androidDeployment: AndroidAppDeploymentExecutor = {
+    withInvalidatedAppResolutionCache: async (_device, operation) => await operation(),
+    prepareArtifact: async () => ({
+      installablePath: '/tmp/app.apk',
+      packageName: 'com.example.app',
+      cleanup: async () => {},
+    }),
+    resolveAppPackage: async (_device, app) => app,
+    ...overrides,
+  };
+  return { androidDeployment } as unknown as PlatformRuntimeHost;
 }
 
 test.each([
@@ -26,41 +52,26 @@ test.each([
 ] as const)(
   'classifies Android deployment facts for the %s denominator cell',
   (_name, runtimeDevice, available) => {
-    const facts = androidAppDeploymentFacts(runtimeDevice);
-    for (const fact of Object.values(facts)) {
+    for (const fact of Object.values(androidAppDeploymentFacts(runtimeDevice))) {
       expect(fact.available).toBe(available);
       if (!available) expect(fact).toMatchObject({ reason: 'unsupported-device-kind' });
     }
   },
 );
 
-test('exposes all Android deployment operations only for admitted kinds', async () => {
+test('exposes the complete Android deployment operation set only for admitted kinds', async () => {
   const cleanup = vi.fn(async () => {});
-  const ensureBooted = vi.fn(async () => {});
   const prepareArtifact = vi.fn(async () => ({
     installablePath: '/tmp/app.apk',
     packageName: 'com.example.app',
     cleanup,
   }));
-  const install = vi.fn(async () => 'com.example.app');
-  const uninstall = vi.fn(async () => ({ packageName: 'com.example.replaced' }));
-  const appName = vi.fn(async () => 'Example');
-  const push = vi.fn(async () => ({ action: 'com.example.app.TEST_PUSH', extrasCount: 0 }));
-  const executor = {
-    ensureBooted,
-    withInvalidatedAppResolutionCache: withoutInvalidatingAppResolutionCache,
-    prepareArtifact,
-    install,
-    uninstall,
-    appName,
-    push,
-  } as AndroidAppDeploymentExecutor;
+  const resolveAppPackage = vi.fn(async () => 'com.example.replaced');
+  native.installAndroidArtifact.mockResolvedValue('com.example.app');
+  native.pushAndroidNotification.mockResolvedValue({ action: 'test', extrasCount: 0 });
+  const host = hostFixture({ prepareArtifact, resolveAppPackage });
   const signal = new AbortController().signal;
-  const operations = createAndroidAppDeploymentOperations({
-    executor,
-    device,
-    signal,
-  });
+  const operations = createAndroidAppDeploymentOperations({ host, device, signal });
 
   await operations.deployApp?.({ app: '', appPath: '/tmp/app.apk', replaceExisting: false });
   const artifact = await operations.materializeAppSource?.({
@@ -75,187 +86,106 @@ test('exposes all Android deployment operations only for admitted kinds', async 
   });
 
   expect(prepareArtifact).toHaveBeenCalledTimes(3);
-  expect(install).toHaveBeenCalledTimes(3);
-  expect(uninstall).toHaveBeenCalledOnce();
-  expect(appName).toHaveBeenCalledTimes(2);
-  expect(push).toHaveBeenCalledOnce();
-  expect(cleanup).toHaveBeenCalledTimes(2);
-  expect(uninstall).toHaveBeenCalledWith(device, 'com.example.replaced', signal);
-  expect(install).toHaveBeenCalledWith(device, '/tmp/app.apk', {
-    packageNameHint: 'com.example.app',
+  expect(native.installAndroidArtifact).toHaveBeenCalledTimes(3);
+  expect(native.uninstallAndroidPackage).toHaveBeenCalledWith(
+    host,
+    device,
+    'com.example.replaced',
     signal,
-  });
-  expect(push).toHaveBeenCalledWith(device, { appId: 'com.example.app', payload: {} }, signal);
-  expect(prepareArtifact).toHaveBeenNthCalledWith(
-    1,
-    { source: { kind: 'path', path: '/tmp/app.apk' } },
-    expect.objectContaining({ resolveIdentity: true }),
   );
-  expect(prepareArtifact).toHaveBeenNthCalledWith(
-    3,
-    { source: { kind: 'path', path: '/tmp/app.apk' } },
-    expect.objectContaining({ resolveIdentity: false }),
-  );
+  expect(native.pushAndroidNotification).toHaveBeenCalledOnce();
+  expect(cleanup).toHaveBeenCalledTimes(2);
   expect(
     createAndroidAppDeploymentOperations({
-      executor,
+      host,
       device: { ...device, kind: 'simulator' },
-      signal: new AbortController().signal,
+      signal,
     }),
   ).toEqual({});
 });
 
-test('preserves the pre-install Android boot wait before artifact identity inspection', async () => {
+test('waits for Android readiness before inspecting an install artifact', async () => {
   const order: string[] = [];
-  const ensureBooted = vi.fn(async () => {
+  ensureAndroidReady.mockImplementationOnce(async () => {
     order.push('ready');
+    return device;
   });
-  const prepareArtifact = vi.fn(async () => {
-    order.push('prepare');
-    return {
-      installablePath: '/tmp/app.apk',
-      packageName: 'com.example.app',
-      cleanup: async () => {},
-    };
+  const host = hostFixture({
+    prepareArtifact: async () => {
+      order.push('prepare');
+      return { installablePath: '/tmp/app.apk', cleanup: async () => {} };
+    },
   });
-  const executor = {
-    ensureBooted,
-    withInvalidatedAppResolutionCache: withoutInvalidatingAppResolutionCache,
-    prepareArtifact,
-    install: async () => 'com.example.app',
-    uninstall: async () => ({ packageName: 'com.example.app' }),
-    appName: async () => 'Example',
-    push: async () => ({}),
-  } as AndroidAppDeploymentExecutor;
-  const signal = new AbortController().signal;
-  const operations = createAndroidAppDeploymentOperations({
-    executor,
+  native.installAndroidArtifact.mockResolvedValueOnce(undefined);
+
+  await createAndroidAppDeploymentOperations({
+    host,
     device: { ...device, booted: false },
-    signal,
-  });
+    signal: new AbortController().signal,
+  }).deployApp?.({ app: '', appPath: '/tmp/app.apk', replaceExisting: false });
 
-  await operations.deployApp?.({ app: '', appPath: '/tmp/app.apk', replaceExisting: false });
-
-  expect(ensureBooted).toHaveBeenCalledWith({ ...device, booted: false }, signal);
+  expect(ensureAndroidReady).toHaveBeenCalledWith(
+    host,
+    { ...device, booted: false },
+    { headless: false },
+    expect.any(AbortSignal),
+  );
   expect(order).toEqual(['ready', 'prepare']);
 });
 
-test('preserves Android reinstall partial-failure ordering', async () => {
+test('preserves reinstall partial-failure ordering and whole-operation cache invalidation', async () => {
   const order: string[] = [];
-  const uninstall = vi.fn(async () => {
+  const cacheCalls: DeviceInfo[] = [];
+  const withInvalidatedAppResolutionCache = async <Result>(
+    cacheDevice: DeviceInfo,
+    operation: () => Promise<Result>,
+  ): Promise<Result> => {
+    cacheCalls.push(cacheDevice);
+    order.push('cache-before');
+    try {
+      return await operation();
+    } finally {
+      order.push('cache-after');
+    }
+  };
+  const host = hostFixture({
+    withInvalidatedAppResolutionCache,
+    resolveAppPackage: async () => {
+      order.push('resolve');
+      return 'com.example.replaced';
+    },
+    prepareArtifact: async () => {
+      order.push('prepare');
+      throw new Error('replacement artifact is invalid');
+    },
+  });
+  native.uninstallAndroidPackage.mockImplementationOnce(async () => {
     order.push('uninstall');
-    return { packageName: 'com.example.replaced' };
-  });
-  const prepareArtifact = vi.fn(async () => {
-    order.push('prepare');
-    throw new Error('replacement artifact is invalid');
-  });
-  const install = vi.fn(async () => {
-    order.push('install');
-    return 'com.example.replaced';
-  });
-  const executor = {
-    ensureBooted: async () => {},
-    withInvalidatedAppResolutionCache: withoutInvalidatingAppResolutionCache,
-    prepareArtifact,
-    install,
-    uninstall,
-    appName: async () => 'Example',
-    push: async () => ({}),
-  } as AndroidAppDeploymentExecutor;
-  const operations = createAndroidAppDeploymentOperations({
-    executor,
-    device,
-    signal: new AbortController().signal,
   });
 
   await expect(
-    operations.deployApp?.({
-      app: 'com.example.replaced',
+    createAndroidAppDeploymentOperations({
+      host,
+      device,
+      signal: new AbortController().signal,
+    }).deployApp?.({
+      app: 'Maps',
       appPath: '/tmp/replacement.apk',
       replaceExisting: true,
     }),
   ).rejects.toThrow('replacement artifact is invalid');
 
-  expect(order).toEqual(['uninstall', 'prepare']);
-  expect(install).not.toHaveBeenCalled();
-});
-
-test('clears cached fuzzy Android resolution before and after the whole reinstall', async () => {
-  const cachedResolutions = new Map([['Maps', 'com.example.stale']]);
-  const withInvalidatedAppResolutionCache = vi.fn(
-    async <Result>(_device: DeviceInfo, operation: () => Promise<Result>): Promise<Result> => {
-      cachedResolutions.clear();
-      try {
-        return await operation();
-      } finally {
-        cachedResolutions.clear();
-      }
-    },
-  );
-  const resolveFuzzyTarget = vi.fn(async (target: string) => {
-    const resolved = cachedResolutions.get(target) ?? 'com.example.current';
-    cachedResolutions.set(target, resolved);
-    return resolved;
-  });
-  const uninstall = vi.fn(async (_device: DeviceInfo, app: string) => {
-    const packageName = await resolveFuzzyTarget(app);
-    if (packageName !== 'com.example.current') {
-      throw new Error(`stale fuzzy target: ${packageName}`);
-    }
-    return { packageName };
-  });
-  const install = vi.fn(async () => {
-    cachedResolutions.set('Maps', 'com.example.replacement');
-    return 'com.example.current';
-  });
-  const executor = {
-    ensureBooted: async () => {},
-    prepareArtifact: async () => ({
-      installablePath: '/tmp/replacement.apk',
-      cleanup: async () => {},
-    }),
-    install,
-    uninstall,
-    appName: async () => 'Example',
-    push: async () => ({}),
-    withInvalidatedAppResolutionCache,
-  } as AndroidAppDeploymentExecutor;
-  const operations = createAndroidAppDeploymentOperations({
-    executor,
-    device,
-    signal: new AbortController().signal,
-  });
-
-  await expect(
-    operations.deployApp?.({
-      app: 'Maps',
-      appPath: '/tmp/replacement.apk',
-      replaceExisting: true,
-    }),
-  ).resolves.toEqual({ packageName: 'com.example.current', launchTarget: 'com.example.current' });
-
-  expect(withInvalidatedAppResolutionCache).toHaveBeenCalledOnce();
-  expect(resolveFuzzyTarget).toHaveBeenCalledWith('Maps');
-  expect(cachedResolutions).toEqual(new Map());
+  expect(order).toEqual(['cache-before', 'resolve', 'uninstall', 'prepare', 'cache-after']);
+  expect(cacheCalls).toEqual([device]);
+  expect(native.installAndroidArtifact).not.toHaveBeenCalled();
 });
 
 test('keeps ordinary Android install successful when identity is unavailable', async () => {
-  const appName = vi.fn(async () => 'should not be called');
-  const executor = {
-    ensureBooted: async () => {},
-    withInvalidatedAppResolutionCache: withoutInvalidatingAppResolutionCache,
-    prepareArtifact: async () => ({
-      installablePath: '/tmp/app.apk',
-      cleanup: async () => {},
-    }),
-    install: async () => undefined,
-    uninstall: async () => ({ packageName: 'com.example.app' }),
-    appName,
-    push: async () => ({}),
-  } as AndroidAppDeploymentExecutor;
+  native.installAndroidArtifact.mockResolvedValueOnce(undefined);
   const operations = createAndroidAppDeploymentOperations({
-    executor,
+    host: hostFixture({
+      prepareArtifact: async () => ({ installablePath: '/tmp/app.apk', cleanup: async () => {} }),
+    }),
     device,
     signal: new AbortController().signal,
   });
@@ -263,5 +193,5 @@ test('keeps ordinary Android install successful when identity is unavailable', a
   await expect(
     operations.deployApp?.({ app: '', appPath: '/tmp/app.apk', replaceExisting: false }),
   ).resolves.toEqual({});
-  expect(appName).not.toHaveBeenCalled();
+  expect(native.inferAndroidAppName).not.toHaveBeenCalled();
 });

@@ -79,7 +79,7 @@ export function createAndroidPlatformRuntime(host: PlatformRuntimeHost): Platfor
         operations: Object.freeze({
           ...logs.operations,
           ...createAndroidAppDeploymentOperations({
-            executor: host.androidDeployment,
+            host,
             device: request.device,
             signal: request.scope.signal,
           }),

@@ -76,12 +76,10 @@ export type AppleAppDeploymentExecutor = Readonly<{
 }>;
 
 /**
- * The Android package owns deployment sequencing and cache lifetime. Composition supplies only
- * concrete ADB/artifact executor calls.
+ * The Android package owns deployment sequencing and native command construction. Composition
+ * supplies only the temporary legacy artifact and fuzzy-resolution seams.
  */
 export type AndroidAppDeploymentExecutor = Readonly<{
-  /** Low-level boot wait; the Android deployment package decides when it is needed. */
-  ensureBooted(device: DeviceInfo, signal: AbortSignal): Promise<void>;
   /** Brackets one deploy lifecycle so fuzzy target resolution is clear before and after it. */
   withInvalidatedAppResolutionCache<Result>(
     device: DeviceInfo,
@@ -91,20 +89,5 @@ export type AndroidAppDeploymentExecutor = Readonly<{
     input: MaterializeAppSourceInput,
     options: Readonly<{ resolveIdentity?: boolean; signal: AbortSignal }>,
   ): Promise<MaterializedAppSource>;
-  install(
-    device: DeviceInfo,
-    installablePath: string,
-    options: Readonly<{ packageNameHint?: string; signal: AbortSignal }>,
-  ): Promise<string | undefined>;
-  uninstall(
-    device: DeviceInfo,
-    app: string,
-    signal: AbortSignal,
-  ): Promise<Readonly<{ packageName: string }>>;
-  appName(packageName: string): Promise<string>;
-  push(
-    device: DeviceInfo,
-    input: PushNotificationInput,
-    signal: AbortSignal,
-  ): Promise<PushNotificationResult>;
+  resolveAppPackage(device: DeviceInfo, app: string): Promise<string>;
 }>;

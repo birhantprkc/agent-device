@@ -1,28 +1,14 @@
 import { expect, test, vi } from 'vitest';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 
-const {
-  installAndroidInstallablePathAndResolvePackageName,
-  uninstallAndroidApp,
-  pushAndroidNotification,
-} = vi.hoisted(() => ({
-  installAndroidInstallablePathAndResolvePackageName: vi.fn(),
-  uninstallAndroidApp: vi.fn(),
-  pushAndroidNotification: vi.fn(),
-}));
-
-vi.mock('./platforms/android/app-deployment.ts', () => ({
-  installAndroidInstallablePathAndResolvePackageName,
-  uninstallAndroidApp,
-}));
+const resolveAndroidApp = vi.hoisted(() => vi.fn());
 vi.mock('./platforms/android/app-deployment-resolution.ts', () => ({
+  resolveAndroidApp,
   withAndroidAppResolutionCacheInvalidated: async <Result>(
     _device: DeviceInfo,
     operation: () => Promise<Result>,
   ) => await operation(),
-  inferAndroidAppName: (packageName: string) => packageName,
 }));
-vi.mock('./platforms/android/notifications.ts', () => ({ pushAndroidNotification }));
 
 import { createAndroidAppDeploymentExecutor } from './platform-runtime-android-deployment-executor.ts';
 
@@ -35,23 +21,23 @@ const device: DeviceInfo = {
   booted: true,
 };
 
-test('forwards the binding signal to Android install, uninstall, and push', async () => {
-  installAndroidInstallablePathAndResolvePackageName.mockResolvedValue('com.example.app');
-  uninstallAndroidApp.mockResolvedValue({ package: 'com.example.app' });
-  pushAndroidNotification.mockResolvedValue({ action: 'com.example.PUSH', extrasCount: 0 });
-  const signal = new AbortController().signal;
+test('keeps root composition limited to artifact preparation and app identity resolution', async () => {
+  resolveAndroidApp.mockResolvedValueOnce({ type: 'package', value: 'com.example.app' });
   const executor = createAndroidAppDeploymentExecutor();
 
-  await executor.install(device, '/tmp/app.apk', { packageNameHint: 'com.example.app', signal });
-  await executor.uninstall(device, 'Example', signal);
-  await executor.push(device, { appId: 'com.example.app', payload: {} }, signal);
+  await expect(executor.resolveAppPackage(device, 'Example')).resolves.toBe('com.example.app');
+  expect(resolveAndroidApp).toHaveBeenCalledWith(device, 'Example');
+  expect(Object.keys(executor).sort()).toEqual([
+    'prepareArtifact',
+    'resolveAppPackage',
+    'withInvalidatedAppResolutionCache',
+  ]);
+});
 
-  expect(installAndroidInstallablePathAndResolvePackageName).toHaveBeenCalledWith(
-    device,
-    '/tmp/app.apk',
-    'com.example.app',
-    { signal },
-  );
-  expect(uninstallAndroidApp).toHaveBeenCalledWith(device, 'Example', { signal });
-  expect(pushAndroidNotification).toHaveBeenCalledWith(device, 'com.example.app', {}, { signal });
+test('rejects an intent where uninstall requires an exact Android package', async () => {
+  resolveAndroidApp.mockResolvedValueOnce({ type: 'intent', value: 'example.intent' });
+
+  await expect(
+    createAndroidAppDeploymentExecutor().resolveAppPackage(device, 'example.intent'),
+  ).rejects.toMatchObject({ code: 'INVALID_ARGS' });
 });
