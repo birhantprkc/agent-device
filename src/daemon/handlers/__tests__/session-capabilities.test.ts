@@ -549,11 +549,12 @@ function createAdmissionFacts(
         : { iosPhysicalDeviceBackend: device.iosPhysicalDeviceBackend }),
       providerMode: options.providerMode,
     },
-    operations: createAdmissionOperationFacts(options, unavailable, appsFact),
+    operations: createAdmissionOperationFacts(device, options, unavailable, appsFact),
   };
 }
 
 function createAdmissionOperationFacts(
+  device: DeviceInfo,
   options: AdmissionRuntimeOptions,
   unavailable: ReturnType<typeof unavailableOperationFact>,
   appsFact: ReturnType<typeof appsOperationFact>,
