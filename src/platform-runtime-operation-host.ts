@@ -21,7 +21,6 @@ import { createAppStateRuntimeHost } from './platform-runtime-app-state-host.ts'
 import { createDeviceShutdownRuntimeHost } from './platform-runtime-device-shutdown-host.ts';
 import { createAppleAppDeploymentExecutor } from './platform-runtime-apple-deployment-executor.ts';
 import { createAndroidAppDeploymentExecutor } from './platform-runtime-android-deployment-executor.ts';
-import { createHarmonyAppDeploymentExecutor } from './platform-runtime-harmony-deployment-executor.ts';
 
 export function createPlatformRuntimeHost(options: {
   sessionsDir: string;
@@ -82,7 +81,6 @@ export function createPlatformRuntimeHost(options: {
     appState: createAppStateRuntimeHost(),
     appleDeployment: createAppleAppDeploymentExecutor(),
     androidDeployment: createAndroidAppDeploymentExecutor(),
-    harmonyDeployment: createHarmonyAppDeploymentExecutor(),
     deviceReadiness: Object.freeze({
       applePhysical: createApplePhysicalReadinessHost(),
       appleAutomation: createAppleAutomationKeepHotHost(),

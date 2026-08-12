@@ -52,7 +52,7 @@ test('composes focused deployment executors instead of a cross-family deployment
 
   expect(source).toContain('createAppleAppDeploymentExecutor');
   expect(source).toContain('createAndroidAppDeploymentExecutor');
-  expect(source).toContain('createHarmonyAppDeploymentExecutor');
+  expect(source).not.toContain('createHarmonyAppDeploymentExecutor');
   expect(source).not.toContain('appDeployment:');
   expect(existsSync(join(directory, 'platform-runtime-app-deployment-host.ts'))).toBe(false);
 });

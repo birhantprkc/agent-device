@@ -68,7 +68,7 @@ export function createHarmonyPlatformRuntime(host: PlatformRuntimeHost): Platfor
         operations: Object.freeze({
           ...logs.operations,
           ...createHarmonyAppDeploymentOperations({
-            executor: host.harmonyDeployment,
+            commands: host.commands,
             device: request.device,
             signal: request.scope.signal,
           }),

@@ -114,11 +114,3 @@ export type AndroidAppDeploymentExecutor = Readonly<{
     signal: AbortSignal,
   ): Promise<PushNotificationResult>;
 }>;
-
-/** The HarmonyOS package owns deployment/relaunch semantics above these HDC executor calls. */
-export type HarmonyAppDeploymentExecutor = Readonly<{
-  resolveBundleName(archivePath: string, signal: AbortSignal): Promise<string | undefined>;
-  install(device: DeviceInfo, archivePath: string, signal: AbortSignal): Promise<void>;
-  open(device: DeviceInfo, bundleId: string, signal: AbortSignal): Promise<void>;
-  sleep(milliseconds: number, signal: AbortSignal): Promise<void>;
-}>;

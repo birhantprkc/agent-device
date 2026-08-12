@@ -1,5 +1,5 @@
 import { expect, test, vi } from 'vitest';
-import type { HarmonyAppDeploymentExecutor } from '@agent-device/contracts/platform';
+import type { HostCommandRunner } from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { createHarmonyAppDeploymentOperations, harmonyAppDeploymentFacts } from './runtime.ts';
 
@@ -34,13 +34,19 @@ test.each([
 );
 
 test('exposes only HarmonyOS deployApp after fact admission', async () => {
-  const resolveBundleName = vi.fn(async () => 'com.example.app');
-  const install = vi.fn(async () => {});
-  const open = vi.fn(async () => {});
-  const sleep = vi.fn(async () => {});
-  const executor = { resolveBundleName, install, open, sleep } as HarmonyAppDeploymentExecutor;
+  const run = vi.fn(async (request: { executable: string; args: readonly string[] }) => ({
+    stdout:
+      request.executable === 'unzip'
+        ? '{"app":{"bundleName":"com.example.app"}}'
+        : request.args.includes('dump')
+          ? '{"hapModuleInfos":[{"mainElementName":"MainAbility","moduleName":"entry"}]}'
+          : '',
+    stderr: '',
+    exitCode: 0,
+  }));
+  const commands = { which: async () => undefined, run } as HostCommandRunner;
   const signal = new AbortController().signal;
-  const operations = createHarmonyAppDeploymentOperations({ executor, device, signal });
+  const operations = createHarmonyAppDeploymentOperations({ commands, device, signal });
   await operations.deployApp?.({
     app: 'com.example.app',
     appPath: '/tmp/app.hap',
@@ -51,16 +57,36 @@ test('exposes only HarmonyOS deployApp after fact admission', async () => {
     appPath: '/tmp/app.hap',
     replaceExisting: true,
   });
-  expect(resolveBundleName).toHaveBeenCalledWith('/tmp/app.hap', signal);
-  expect(resolveBundleName).toHaveBeenCalledTimes(2);
-  expect(install).toHaveBeenCalledTimes(2);
-  expect(sleep).toHaveBeenCalledWith(1_000, signal);
-  expect(install).toHaveBeenCalledWith(device, '/tmp/app.hap', signal);
-  expect(open).toHaveBeenCalledWith(device, 'com.example.app', signal);
+  expect(run).toHaveBeenCalledWith(
+    expect.objectContaining({
+      executable: 'hdc',
+      args: ['-t', device.id, 'install', '-r', '/tmp/app.hap'],
+    }),
+    signal,
+  );
+  expect(run).toHaveBeenCalledWith(
+    expect.objectContaining({
+      executable: 'hdc',
+      args: [
+        '-t',
+        device.id,
+        'shell',
+        'aa',
+        'start',
+        '-b',
+        'com.example.app',
+        '-m',
+        'entry',
+        '-a',
+        'MainAbility',
+      ],
+    }),
+    signal,
+  );
   expect(operations).not.toHaveProperty('materializeAppSource');
   expect(
     createHarmonyAppDeploymentOperations({
-      executor,
+      commands,
       device: { ...device, kind: 'simulator' },
       signal,
     }),

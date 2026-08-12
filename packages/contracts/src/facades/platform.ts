@@ -48,7 +48,6 @@ export type {
   AppDeploymentSource,
   AppleAppDeploymentExecutor,
   DeployMaterializedAppInput,
-  HarmonyAppDeploymentExecutor,
   MaterializedAppSource,
   MaterializeAppSourceInput,
   PushNotificationInput,
