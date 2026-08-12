@@ -26,6 +26,7 @@ import {
   type RuntimePlatformModule,
 } from './platform-runtime.ts';
 import { runtimeUse } from './platform-runtime-use.ts';
+import type { AndroidToolHost } from './platform-runtime-host.ts';
 
 export type PlatformRuntimeOperations = AppLogRuntimeOperations &
   AppInventoryRuntimeOperations &
@@ -95,6 +96,7 @@ export type PlatformRuntimeHost = AppLogRuntimeHost &
     /** Focused native ports; deployment semantics remain in the owning family packages. */
     appleDeployment: AppleAppDeploymentExecutor;
     androidDeployment: AndroidAppDeploymentExecutor;
+    androidTools: AndroidToolHost;
     temporaryFiles: Readonly<{
       create(
         options: Readonly<{ prefix: string; suffix: string }>,

@@ -47,6 +47,29 @@ export type AppleToolHost = Readonly<{
   run(request: AppleToolRequest, signal?: AbortSignal): Promise<HostCommandResult>;
 }>;
 
+/** Device-scoped Android transport selected by root composition; packages own all adb arguments. */
+export type AndroidToolHost = Readonly<{
+  runAdb(
+    device: DeviceInfo,
+    args: readonly string[],
+    options: Readonly<{ allowFailure?: boolean; timeoutMs?: number }>,
+    signal?: AbortSignal,
+  ): Promise<HostCommandResult>;
+  installPackage(
+    device: DeviceInfo,
+    packagePath: string,
+    options: Readonly<{ replace: boolean }>,
+    signal?: AbortSignal,
+  ): Promise<HostCommandResult>;
+  /** Returns false when the selected transport has no bundle installer. */
+  installBundle(
+    device: DeviceInfo,
+    bundlePath: string,
+    mode: string,
+    signal?: AbortSignal,
+  ): Promise<boolean>;
+}>;
+
 export type HostOperatingSystem = 'darwin' | 'linux' | 'win32' | 'other';
 
 export type HostTemporaryTextFile = AsyncDisposable &

@@ -255,6 +255,7 @@ export type {
   AppleToolHost,
   AppleToolRequest,
   AppleXcrunTool,
+  AndroidToolHost,
   HostCommandRequest,
   HostCommandResult,
   HostCommandRunner,

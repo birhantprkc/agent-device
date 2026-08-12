@@ -14,7 +14,12 @@ export async function installAndroidArtifact(
   if (path.extname(installablePath).toLowerCase() === '.aab') {
     await installAndroidBundle(host, device, installablePath, signal);
   } else {
-    const result = await runAdb(host, device, ['install', '-r', installablePath], signal, 180_000);
+    const result = await host.androidTools.installPackage(
+      device,
+      installablePath,
+      { replace: true },
+      signal,
+    );
     assertCommandSuccess(result, 'adb install failed');
   }
   if (packageNameHint) return packageNameHint;
@@ -93,6 +98,7 @@ async function installAndroidBundle(
   bundlePath: string,
   signal: AbortSignal,
 ): Promise<void> {
+  if (await host.androidTools.installBundle(device, bundlePath, 'universal', signal)) return;
   const bundletool = await host.commands.which('bundletool');
   const jar = host.androidDeployment.bundletoolJar;
   if (!bundletool && !jar) {
@@ -178,10 +184,7 @@ async function runAdb(
   signal: AbortSignal,
   timeoutMs = 15_000,
 ) {
-  return await host.commands.run(
-    { executable: 'adb', args: ['-s', device.id, ...args], timeoutMs, allowFailure: true },
-    signal,
-  );
+  return await host.androidTools.runAdb(device, args, { timeoutMs, allowFailure: true }, signal);
 }
 
 function assertCommandSuccess(

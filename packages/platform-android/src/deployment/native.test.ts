@@ -1,5 +1,5 @@
 import { beforeEach, expect, test, vi } from 'vitest';
-import type { PlatformRuntimeHost } from '@agent-device/contracts/platform';
+import type { AndroidToolHost, PlatformRuntimeHost } from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import {
   installAndroidArtifact,
@@ -27,6 +27,20 @@ function hostFixture(options: { bundletool?: boolean; bundletoolJar?: string } =
       run,
     },
     androidDeployment: { bundletoolJar: options.bundletoolJar },
+    androidTools: {
+      runAdb: async (_device, args, commandOptions, signal) =>
+        await run({ executable: 'adb', args, ...commandOptions }, signal),
+      installPackage: async (_device, packagePath, options, signal) =>
+        await run(
+          {
+            executable: 'adb-install',
+            args: [packagePath],
+            replace: options.replace,
+          },
+          signal,
+        ),
+      installBundle: async () => false,
+    } satisfies AndroidToolHost,
     temporaryFiles: {
       create: async () => ({
         path: '/tmp/bundle.apks',
@@ -53,9 +67,9 @@ test('constructs a signal-bound adb install in the Android package', async () =>
 
   expect(run).toHaveBeenCalledWith(
     expect.objectContaining({
-      executable: 'adb',
-      args: ['-s', device.id, 'install', '-r', '/tmp/app.apk'],
-      timeoutMs: 180_000,
+      executable: 'adb-install',
+      args: ['/tmp/app.apk'],
+      replace: true,
     }),
     signal,
   );
