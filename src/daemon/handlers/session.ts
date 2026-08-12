@@ -1,16 +1,15 @@
 import { dispatchCommand } from '../../core/dispatch.ts';
 import { PUBLIC_COMMANDS } from '../../command-catalog.ts';
+import { resolvePayloadInput } from '../../utils/payload-input.ts';
 import type { AndroidAdbExecutor } from '../../platforms/android/adb-executor.ts';
-import {
-  prepareIosRunner,
-  type PrepareIosRunnerResult,
-} from '../../platforms/apple/core/runner/runner-client.ts';
-import type { DeviceInfo } from '@agent-device/kernel/device';
-import { publicPlatformString } from '@agent-device/kernel/device';
+import { publicPlatformString, type DeviceInfo } from '@agent-device/kernel/device';
 import type { DaemonInvokeFn, DaemonRequest, DaemonResponse, SessionState } from '../types.ts';
 import { SessionStore } from '../session-store.ts';
 import { contextFromFlags } from '../context.ts';
-import { buildAppleRunnerRequestOptions } from '../apple-runner-options.ts';
+import {
+  handleInstallFromSourceCommand,
+  handleReleaseMaterializedPathsCommand,
+} from './install-source.ts';
 import { requireSessionOrExplicitSelector, resolveCommandDevice } from './session-device-utils.ts';
 import { errorResponse, requireCommandSupported } from './response.ts';
 import { recordSessionAction } from './handler-utils.ts';
@@ -20,10 +19,13 @@ import { composeOpenWithInitialSnapshot } from './session-open-foreground.ts';
 import {
   resolveAndroidPackageForOpen,
   resolveSessionAppBundleIdForTarget,
-} from './session-open-target.ts';
+} from '../../platform-runtime-open-target.ts';
 import { handleCloseCommand } from './session-close.ts';
-import { handleReleaseMaterializedPathsCommand } from './session-app-source-deployment.ts';
-import { handleSessionAppDeploymentCommand } from './session-app-deployment-route.ts';
+import {
+  defaultInstallOps,
+  defaultReinstallOps,
+  handleAppDeployCommand,
+} from './session-deploy.ts';
 import { runBatchCommands } from './session-batch.ts';
 import { handleSessionInventoryCommands } from './session-inventory.ts';
 import { handleSessionStateCommands } from './session-state.ts';
@@ -31,12 +33,11 @@ import { handleSessionObservabilityCommands } from './session-observability.ts';
 import { handleSessionReplayCommands } from './session-replay.ts';
 import { handleSessionScriptPublication } from './session-script-publication.ts';
 import { handleDoctorCommand } from './session-doctor.ts';
+import { handlePrepareCommand } from './session-prepare.ts';
 import { resolveRefFrameEffect } from '../daemon-command-registry.ts';
 import type { DescriptorSessionRouteCommandName } from '../../core/command-descriptor/registry.ts';
 import { expireRefFrame } from '../ref-frame.ts';
 import { LeaseRegistry } from '../lease-registry.ts';
-import { PREPARE_REQUEST_TIMEOUT_MS } from '../../core/command-descriptor/timeout-policy.ts';
-import { Deadline } from '../../utils/retry.ts';
 import type { LeaseLifecycleProvider } from '@agent-device/contracts/device';
 import type {
   BindDeviceRuntime,
@@ -46,127 +47,7 @@ import type {
 import type { DeviceClaimReconciler } from '../device-claims.ts';
 import type { AppLogAdmissionLedger } from '../app-log-admission-ledger.ts';
 import type { ScreenRecordingAdmissionLedger } from '../screen-recording-admission-ledger.ts';
-import type {
-  DeviceShutdownCloseCapability,
-  PlatformRequestScope,
-} from '@agent-device/contracts/platform';
-
-const PREPARE_IOS_RUNNER_TIMING_NOTE =
-  'Top-level prepare timing fields are diagnostic and may overlap; use timing.additiveParts for additive wall-clock phases.';
-
-async function handlePrepareCommand(params: {
-  req: DaemonRequest;
-  sessionName: string;
-  logPath: string;
-  sessionStore: SessionStore;
-}): Promise<DaemonResponse> {
-  const { req, sessionName, logPath, sessionStore } = params;
-  const action = req.positionals?.[0] ?? '';
-  if (action !== 'ios-runner') {
-    return errorResponse('INVALID_ARGS', 'prepare requires a subcommand: ios-runner');
-  }
-
-  const session = sessionStore.get(sessionName);
-  const flags = req.flags ?? {};
-  const guard = requireSessionOrExplicitSelector(PUBLIC_COMMANDS.prepare, session, flags);
-  if (guard) return guard;
-
-  const device = await resolveCommandDevice({
-    session,
-    flags,
-    ensureReady: true,
-  });
-  const unsupported = requireCommandSupported(PUBLIC_COMMANDS.prepare, device);
-  if (unsupported) return unsupported;
-
-  const startedAtMs = Date.now();
-  const result = await prepareIosRunner(
-    device,
-    buildPrepareIosRunnerOptions(req, session, logPath, startedAtMs),
-  );
-  const durationMs = Math.max(0, Date.now() - startedAtMs);
-  return {
-    ok: true,
-    data: prepareIosRunnerResponseData(action, device, durationMs, result),
-  };
-}
-
-function buildPrepareIosRunnerOptions(
-  req: DaemonRequest,
-  session: SessionState | undefined,
-  logPath: string,
-  startedAtMs: number,
-): Parameters<typeof prepareIosRunner>[1] {
-  const timeoutMs = readPrepareIosRunnerTimeoutMs(req);
-  return {
-    ...buildAppleRunnerRequestOptions({
-      req,
-      logPath,
-      traceLogPath: session?.trace?.outPath,
-    }),
-    cleanStaleBundles: true,
-    buildTimeoutMs: timeoutMs,
-    healthTimeoutMs: timeoutMs,
-    prepareDeadline: Deadline.fromTimeoutMs(timeoutMs, startedAtMs),
-    startupTimeoutMs: timeoutMs,
-  };
-}
-
-function readPrepareIosRunnerTimeoutMs(req: DaemonRequest): number {
-  const value = req.flags?.timeoutMs;
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? value
-    : PREPARE_REQUEST_TIMEOUT_MS;
-}
-
-function prepareIosRunnerResponseData(
-  action: string,
-  device: DeviceInfo,
-  durationMs: number,
-  result: PrepareIosRunnerResult,
-): Record<string, unknown> {
-  return {
-    action,
-    platform: publicPlatformString(device),
-    deviceId: device.id,
-    deviceName: device.name,
-    kind: device.kind,
-    durationMs,
-    ...result,
-    timing: prepareIosRunnerTiming(durationMs, result),
-    message: `Prepared Apple runner: ${device.name}`,
-  };
-}
-
-function prepareIosRunnerTiming(
-  durationMs: number,
-  result: PrepareIosRunnerResult,
-): Record<string, unknown> {
-  const buildMs = normalizeOptionalTimingMs(result.buildMs);
-  const connectMs = normalizeTimingMs(result.connectMs);
-  const healthCheckMs = normalizeTimingMs(result.healthCheckMs);
-  const additiveParts = {
-    ...(buildMs === undefined ? {} : { buildMs }),
-    connectAfterBuildMs: Math.max(0, connectMs - (buildMs ?? 0)),
-    healthCheckMs,
-  };
-
-  return {
-    totalMs: durationMs,
-    additiveParts,
-    containment:
-      buildMs === undefined ? { healthCheckMs: [] } : { connectMs: ['buildMs'], healthCheckMs: [] },
-    note: PREPARE_IOS_RUNNER_TIMING_NOTE,
-  };
-}
-
-function normalizeOptionalTimingMs(value: number | undefined): number | undefined {
-  return value === undefined ? undefined : normalizeTimingMs(value);
-}
-
-function normalizeTimingMs(value: number): number {
-  return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
-}
+import type { PlatformRequestScope } from '@agent-device/contracts/platform';
 
 // fallow-ignore-next-line complexity
 async function runSessionOrSelectorDispatch(params: {
@@ -282,7 +163,6 @@ export type SessionCommandInput = {
   androidAdbExecutor?: AndroidAdbExecutor;
   bindDevice?: BindDeviceRuntime;
   inspectFacts?: InspectDeviceRuntimeFacts;
-  getCloseShutdown?: () => Promise<DeviceShutdownCloseCapability>;
   bindExactDevice?: BindExactDeviceRuntime;
   appLogAdmissionLedger?: AppLogAdmissionLedger;
   screenRecordingAdmissionLedger?: ScreenRecordingAdmissionLedger;
@@ -302,15 +182,15 @@ const handleSessionInventoryCommandGroup: SessionCommandHandler = async ({
   req,
   sessionName,
   sessionStore,
-  bindDevice,
   inspectFacts,
+  bindDevice,
 }) =>
   await handleSessionInventoryCommands({
     req,
     sessionName,
     sessionStore,
-    bindDevice,
     inspectFacts,
+    bindDevice,
   });
 
 const handleSessionStateCommandGroup: SessionCommandHandler = async ({
@@ -356,6 +236,7 @@ const handleSessionReplayCommandGroup: SessionCommandHandler = async ({
   invoke,
   invokeReplayAction,
   bindDevice,
+  inspectFacts,
   bindExactDevice,
   screenRecordingAdmissionLedger,
   requestScope,
@@ -370,6 +251,7 @@ const handleSessionReplayCommandGroup: SessionCommandHandler = async ({
     leaseRegistry,
     invoke: invokeReplayAction ?? invoke,
     bindDevice,
+    inspectFacts,
     bindExactDevice,
     screenRecordingAdmissionLedger,
     requestScope,
@@ -400,6 +282,28 @@ async function handleKeyboardCommand(params: SessionCommandParams): Promise<Daem
     sessionStore,
     command: PUBLIC_COMMANDS.keyboard,
     positionals: req.positionals ?? [],
+  });
+}
+
+async function handlePushCommand(params: SessionCommandParams): Promise<DaemonResponse> {
+  const { req, sessionName, logPath, sessionStore } = params;
+  const appId = req.positionals?.[0]?.trim();
+  const payloadArg = req.positionals?.[1]?.trim();
+  if (!appId || !payloadArg) {
+    return errorResponse(
+      'INVALID_ARGS',
+      'push requires <bundle|package> <payload.json|inline-json>',
+    );
+  }
+
+  return await runSessionOrSelectorDispatch({
+    req,
+    sessionName,
+    logPath,
+    sessionStore,
+    command: PUBLIC_COMMANDS.push,
+    positionals: [appId, maybeResolvePushPayloadPath(payloadArg, req.meta?.cwd)],
+    recordPositionals: [appId, payloadArg],
   });
 }
 
@@ -466,8 +370,14 @@ const SESSION_COMMAND_HANDLER_IMPLS = {
   appstate: handleSessionStateCommandGroup,
   session_save_script: async ({ req, sessionName, sessionStore }) =>
     handleSessionScriptPublication({ req, sessionName, sessionStore }),
-  runtime: async ({ req, sessionName, sessionStore }) =>
-    await handleRuntimeCommand({ req, sessionName, sessionStore }),
+  runtime: async ({ req, sessionName, sessionStore, inspectFacts, bindDevice }) =>
+    await handleRuntimeCommand({
+      req,
+      sessionName,
+      sessionStore,
+      inspectFacts,
+      bindDevice,
+    }),
   clipboard: async ({ req, sessionName, logPath, sessionStore }) =>
     await handleClipboardCommand({ req, sessionName, logPath, sessionStore }),
   keyboard: handleKeyboardCommand,
@@ -476,16 +386,46 @@ const SESSION_COMMAND_HANDLER_IMPLS = {
   events: handleSessionObservabilityCommandGroup,
   network: handleSessionObservabilityCommandGroup,
   audio: handleSessionObservabilityCommandGroup,
-  prepare: async ({ req, sessionName, logPath, sessionStore }) =>
-    await handlePrepareCommand({ req, sessionName, logPath, sessionStore }),
-  install: handleSessionAppDeploymentCommand,
-  reinstall: handleSessionAppDeploymentCommand,
-  install_source: handleSessionAppDeploymentCommand,
+  prepare: async ({ req, sessionName, logPath, sessionStore, inspectFacts, bindDevice }) =>
+    await handlePrepareCommand({
+      req,
+      sessionName,
+      logPath,
+      sessionStore,
+      inspectFacts,
+      bindDevice,
+    }),
+  install: async ({ req, sessionName, sessionStore }) =>
+    await handleAppDeployCommand({
+      req,
+      command: 'install',
+      sessionName,
+      sessionStore,
+      deployOps: defaultInstallOps,
+    }),
+  reinstall: async ({ req, sessionName, sessionStore }) =>
+    await handleAppDeployCommand({
+      req,
+      command: 'reinstall',
+      sessionName,
+      sessionStore,
+      deployOps: defaultReinstallOps,
+    }),
+  install_source: async ({ req, sessionName, sessionStore }) =>
+    await handleInstallFromSourceCommand({ req, sessionName, sessionStore }),
   release_materialized_paths: async ({ req }) =>
     await handleReleaseMaterializedPathsCommand({ req }),
-  push: handleSessionAppDeploymentCommand,
+  push: handlePushCommand,
   'trigger-app-event': handleTriggerAppEventCommand,
-  open: async ({ req, sessionName, logPath, sessionStore, reconcileOrphanedDeviceClaim }) =>
+  open: async ({
+    req,
+    sessionName,
+    logPath,
+    sessionStore,
+    inspectFacts,
+    bindDevice,
+    reconcileOrphanedDeviceClaim,
+  }) =>
     await composeOpenWithInitialSnapshot({
       req,
       sessionName,
@@ -496,6 +436,8 @@ const SESSION_COMMAND_HANDLER_IMPLS = {
         sessionName,
         logPath,
         sessionStore,
+        inspectFacts,
+        bindDevice,
         reconcileOrphanedDeviceClaim,
       }),
     }),
@@ -509,7 +451,8 @@ const SESSION_COMMAND_HANDLER_IMPLS = {
     sessionStore,
     leaseRegistry,
     leaseLifecycleProvider,
-    getCloseShutdown,
+    inspectFacts,
+    bindDevice,
   }) =>
     await handleCloseCommand({
       req,
@@ -518,7 +461,8 @@ const SESSION_COMMAND_HANDLER_IMPLS = {
       sessionStore,
       leaseRegistry,
       leaseLifecycleProvider,
-      getCloseShutdown,
+      inspectFacts,
+      bindDevice,
     }),
 } satisfies Record<DescriptorSessionRouteCommandName, SessionCommandHandler>;
 
@@ -536,7 +480,6 @@ export async function handleSessionCommands(
     invokeReplayAction,
     androidAdbExecutor,
     inspectFacts,
-    getCloseShutdown,
     bindDevice,
     bindExactDevice,
     appLogAdmissionLedger,
@@ -562,7 +505,6 @@ export async function handleSessionCommands(
     invokeReplayAction,
     androidAdbExecutor,
     inspectFacts,
-    getCloseShutdown,
     bindDevice,
     bindExactDevice,
     appLogAdmissionLedger,
@@ -572,4 +514,13 @@ export async function handleSessionCommands(
     throwIfCanceled,
     reconcileOrphanedDeviceClaim,
   });
+}
+
+function maybeResolvePushPayloadPath(payloadArg: string, cwd?: string): string {
+  const resolved = resolvePayloadInput(payloadArg, {
+    subject: 'Push payload',
+    cwd,
+    expandPath: (value, currentCwd) => SessionStore.expandHome(value, currentCwd),
+  });
+  return resolved.kind === 'file' ? resolved.path : resolved.text;
 }

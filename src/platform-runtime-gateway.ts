@@ -1,8 +1,10 @@
 import type { ProviderDeviceRuntime } from '@agent-device/contracts/device';
 import {
+  applicationLifecycleOperationFacts,
   createUnavailablePlatformRuntimeBinding,
   createUnavailablePlatformRuntimeFacts,
   providerRuntimeOwner,
+  runStartupRecoveryFence,
   runtimeOwnerKey,
   sameRuntimeOwner,
   type DeviceBinding,
@@ -66,6 +68,29 @@ export function createComposedPlatformRuntimeGateway(options: {
       throw error;
     }
   };
+  // Which durable resources exist is the host's composition problem; the gateway only owns the
+  // once-per-process shape of each phase and keeps the host load lazy.
+  let lifecycleDetach: Promise<void> | undefined;
+  let lifecycleFinalize: Promise<void> | undefined;
+  const applicationLifecycle = Object.freeze({
+    recoverStartupResources: async (input: Readonly<{ stateDir: string }>) => {
+      await runStartupRecoveryFence(input.stateDir, async () => {
+        await (await loadHost()).applicationResources.recoverStartupResources(input);
+      });
+    },
+    detachForDaemonShutdown: async () => {
+      lifecycleDetach ??= loadHost().then(
+        async (host) => await host.applicationResources.detachForDaemonShutdown(),
+      );
+      await lifecycleDetach;
+    },
+    finalizeDaemonShutdown: async () => {
+      lifecycleFinalize ??= loadHost().then(
+        async (host) => await host.applicationResources.finalizeDaemonShutdown(),
+      );
+      await lifecycleFinalize;
+    },
+  });
   const registerOwner = (owner: PlatformRuntimeOwner) => {
     const key = runtimeOwnerKey(owner.owner);
     const existing = loadedOwners.get(key);
@@ -124,6 +149,7 @@ export function createComposedPlatformRuntimeGateway(options: {
   };
 
   return Object.freeze({
+    applicationLifecycle,
     inspectFacts: async (device) => {
       const provider = selectOrdinaryProvider(options.providerRuntimes, device);
       if (provider) {
@@ -153,14 +179,6 @@ export function createComposedPlatformRuntimeGateway(options: {
         return await bindAndValidate(await loadProvider(module), request);
       }
       return await bindAndValidate(await loadLocal(request.device.platform), request);
-    },
-    getCloseShutdown: async () => {
-      const host = await loadHost();
-      const capability = host.deviceShutdown.close;
-      if (!capability) {
-        throw runtimeContractError('Platform runtime close shutdown capability is unavailable');
-      }
-      return capability;
     },
     shutdown: async () => {
       await Promise.allSettled(
@@ -283,9 +301,9 @@ function unavailableProviderBinding(
   });
   return createUnavailablePlatformRuntimeBinding(device, owner, {
     appLog: unavailable,
-    appDeployment: unavailable,
     appState: unavailable,
     network: unavailable,
+    lifecycle: unavailableProviderLifecycleFacts(unavailable),
   });
 }
 
@@ -299,12 +317,32 @@ function unavailableProviderFacts(runtime: ProviderDeviceRuntime, device: Device
     providerRuntimeOwner(runtime.provider, 'default'),
     {
       appLog: unavailable,
-      appDeployment: unavailable,
       appState: unavailable,
       network: unavailable,
       readiness: unavailable,
+      lifecycle: unavailableProviderLifecycleFacts(unavailable),
     },
   );
+}
+
+/** Missing provider modules must fail closed per operation, never via a shared lifecycle bucket. */
+function unavailableProviderLifecycleFacts(
+  unavailable: Extract<
+    DeviceBinding<PlatformRuntimeOperations>['facts']['operations'][keyof PlatformRuntimeOperations],
+    { available: false }
+  >,
+) {
+  return applicationLifecycleOperationFacts({
+    resolveOpenTarget: unavailable,
+    prepareApplicationOpen: unavailable,
+    openApplication: unavailable,
+    applyRuntimeHints: unavailable,
+    clearRuntimeHints: unavailable,
+    closeApplication: unavailable,
+    finalizeApplicationClose: unavailable,
+    prepareAppleRunner: unavailable,
+    configureProviderPortReverse: unavailable,
+  });
 }
 
 function ownerUnavailable(owner: RuntimeOwnerRef): AppError {

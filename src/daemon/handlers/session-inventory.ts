@@ -1,4 +1,3 @@
-import { PUBLIC_COMMANDS } from '../../command-catalog.ts';
 import { isCommandSupportedOnDevice, listCapabilityCommands } from '../../core/capabilities.ts';
 import { listDeviceInventory } from '../../core/device-inventory-context.ts';
 import { assertResolvedAppsFilter } from '@agent-device/contracts/device';
@@ -17,7 +16,7 @@ import {
   resolveAndroidSerialAllowlist,
   resolveIosSimulatorDeviceSetPath,
 } from '../../utils/device-isolation.ts';
-import type { DaemonRequest, DaemonResponse, SessionState } from '../types.ts';
+import type { DaemonRequest, DaemonResponse } from '../types.ts';
 import { resolveSessionRunnerLogPath, SessionStore } from '../session-store.ts';
 import {
   requireSessionOrExplicitSelector,
@@ -31,18 +30,20 @@ import {
   appsRuntimeUse,
   networkAdmissionUse,
   screenRecordingAdmissionUse,
+  type PlatformRuntimeOperations,
+  type RuntimeFacts,
+  type BoundDeviceRuntime,
+  type RuntimeOperationKey,
 } from '@agent-device/contracts/platform';
-import type { BoundDeviceRuntime } from '@agent-device/contracts/platform';
 import { ensureAppsRuntimeReady, listAppsFromRuntime } from '../apps-runtime.ts';
 import type { BindDeviceRuntime, InspectDeviceRuntimeFacts } from '../request-runtime-binding.ts';
-import { installFamilyCapabilityAvailable } from './session-install-capability-projection.ts';
 
 export async function handleSessionInventoryCommands(params: {
   req: DaemonRequest;
   sessionName: string;
   sessionStore: SessionStore;
-  bindDevice?: BindDeviceRuntime;
   inspectFacts?: InspectDeviceRuntimeFacts;
+  bindDevice?: BindDeviceRuntime;
 }): Promise<DaemonResponse | null> {
   const { req, sessionName, sessionStore } = params;
   switch (req.command) {
@@ -55,8 +56,8 @@ export async function handleSessionInventoryCommands(params: {
         req,
         sessionName,
         sessionStore,
-        bindDevice: params.bindDevice,
         inspectFacts: params.inspectFacts,
+        bindDevice: params.bindDevice,
       });
     case 'apps':
       return await handleAppsInventory({
@@ -183,8 +184,8 @@ async function capabilitiesInventoryResponse(params: {
   req: DaemonRequest;
   sessionName: string;
   sessionStore: SessionStore;
-  bindDevice?: BindDeviceRuntime;
   inspectFacts?: InspectDeviceRuntimeFacts;
+  bindDevice?: BindDeviceRuntime;
 }): Promise<DaemonResponse> {
   const resolution = await resolveInventoryCommandDevice({
     ...params,
@@ -193,16 +194,14 @@ async function capabilitiesInventoryResponse(params: {
   });
   if ('response' in resolution) return resolution.response;
   const { device } = resolution;
-  const session = params.sessionStore.get(params.sessionName);
   const sessionOwnedAppStateAvailable = isSessionOwnedAppStateAvailable(
     device,
-    session,
+    params.sessionStore.get(params.sessionName),
     params.req.flags,
   );
-  const facts = params.inspectFacts
-    ? await params.inspectFacts(device).catch(() => undefined)
-    : undefined;
-  const appsAvailable = isAppsRuntimeAvailable(facts);
+  // Capability projection is admission-only: every fact-owned command reads this one
+  // side-effect-free exact-device snapshot, never a deleted descriptor capability bucket.
+  const facts = await inspectCapabilityFacts(device, params.inspectFacts);
   const [logsAvailable, networkAvailable, recordingAvailable] = params.bindDevice
     ? await Promise.all([
         params
@@ -216,53 +215,26 @@ async function capabilitiesInventoryResponse(params: {
           .then((runtime) => runtime.facts.screenRecordingStart.available),
       ])
     : [false, false, false];
-  // This is intentionally the only facts projection in the legacy handler: installs
-  // lost their capability bucket in this facet, so report them fail-closed from their
-  // exact use declarations. Wave 6 owns the global capabilities migration.
   return {
     ok: true,
     data: {
       device: publicDeviceInfo(device),
-      availableCommands: listCapabilityCommands().filter((command) =>
-        command === PUBLIC_COMMANDS.logs
+      availableCommands: listCapabilityCommands().filter((command) => {
+        // A session that already owns an app identity answers appstate itself, so it stays
+        // available even when the sessionless runtime probe cannot see a foreground app.
+        if (command === 'appstate' && sessionOwnedAppStateAvailable) return true;
+        const factOwned = factOwnedCapabilityAvailable(command, facts);
+        if (factOwned !== undefined) return factOwned;
+        return command === 'logs'
           ? logsAvailable
-          : command === PUBLIC_COMMANDS.network
+          : command === 'network'
             ? networkAvailable
-            : command === PUBLIC_COMMANDS.record
+            : command === 'record'
               ? recordingAvailable
-              : isInventoryOrInstallCapabilityAvailable(command, {
-                  device,
-                  facts,
-                  appsAvailable,
-                  sessionOwnedAppStateAvailable,
-                }),
-      ),
+              : isCommandSupportedOnDevice(command, device);
+      }),
     },
   };
-}
-
-function isInventoryOrInstallCapabilityAvailable(
-  command: string,
-  availability: Readonly<{
-    device: DeviceInfo;
-    facts: Awaited<ReturnType<InspectDeviceRuntimeFacts>> | undefined;
-    appsAvailable: boolean;
-    sessionOwnedAppStateAvailable: boolean;
-  }>,
-): boolean {
-  if (command === PUBLIC_COMMANDS.apps) return availability.appsAvailable;
-  if (command === PUBLIC_COMMANDS.appState) {
-    return (
-      availability.sessionOwnedAppStateAvailable || isAppStateRuntimeAvailable(availability.facts)
-    );
-  }
-  if (command === PUBLIC_COMMANDS.shutdown) {
-    return availability.facts?.operations.shutdownTarget?.available === true;
-  }
-  return (
-    installFamilyCapabilityAvailable(command, availability.facts) ??
-    isCommandSupportedOnDevice(command, availability.device)
-  );
 }
 
 function isSessionOwnedAppStateAvailable(
@@ -273,20 +245,49 @@ function isSessionOwnedAppStateAvailable(
   if (!session) return false;
   if (!isIosFamily(device) && !isMacOs(device)) return false;
   if (!selectorTargetsSessionDevice(flags, session)) return false;
-  if (session.appName || session.appBundleId) return true;
-  return isSessionOwnedMacOsSurface(device, session.surface);
+  return hasSessionAppIdentity(session) || hasMacSessionSurface(device, session);
 }
 
-function isSessionOwnedMacOsSurface(device: DeviceInfo, surface: SessionState['surface']): boolean {
-  if (!isMacOs(device)) return false;
-  if (surface === undefined) return false;
-  return surface !== 'app' && surface !== 'frontmost-app';
+function hasSessionAppIdentity(session: NonNullable<ReturnType<SessionStore['get']>>): boolean {
+  return Boolean(session.appName || session.appBundleId);
 }
 
-function isAppStateRuntimeAvailable(
-  facts: Awaited<ReturnType<InspectDeviceRuntimeFacts>> | undefined,
+function hasMacSessionSurface(
+  device: DeviceInfo,
+  session: NonNullable<ReturnType<SessionStore['get']>>,
 ): boolean {
-  return facts?.operations.ensureReady.available === true && facts.operations.appState.available;
+  return Boolean(
+    isMacOs(device) &&
+    session.surface !== undefined &&
+    session.surface !== 'app' &&
+    session.surface !== 'frontmost-app',
+  );
+}
+
+/**
+ * Every command whose availability is a runtime fact, and the exact operations it needs. A command
+ * absent from this record is not fact-owned, so its availability is decided elsewhere.
+ */
+const factOwnedCapabilityOperations: Readonly<
+  Record<string, readonly RuntimeOperationKey<PlatformRuntimeOperations>[] | undefined>
+> = Object.freeze({
+  apps: ['ensureReady', 'listApps'],
+  appstate: ['ensureReady', 'appState'],
+  open: ['resolveOpenTarget', 'prepareApplicationOpen', 'openApplication'],
+  close: ['closeApplication', 'finalizeApplicationClose'],
+  prepare: ['prepareAppleRunner'],
+  runtime: ['clearRuntimeHints'],
+});
+
+function factOwnedCapabilityAvailable(
+  command: string,
+  facts: RuntimeFacts<PlatformRuntimeOperations> | undefined,
+): boolean | undefined {
+  const requiredOperations = factOwnedCapabilityOperations[command];
+  if (!requiredOperations) return undefined;
+  return facts
+    ? requiredOperations.every((operation) => facts.operations[operation].available)
+    : false;
 }
 
 async function handleAppsInventory(params: {
@@ -324,10 +325,18 @@ async function handleAppsInventory(params: {
   return appsInventoryResponse(apps);
 }
 
-function isAppsRuntimeAvailable(
-  facts: Awaited<ReturnType<InspectDeviceRuntimeFacts>> | undefined,
-): boolean {
-  return facts?.operations.ensureReady.available === true && facts.operations.listApps.available;
+async function inspectCapabilityFacts(
+  device: DeviceInfo,
+  inspectFacts: InspectDeviceRuntimeFacts | undefined,
+): Promise<RuntimeFacts<PlatformRuntimeOperations> | undefined> {
+  if (!inspectFacts) return undefined;
+  try {
+    return await inspectFacts(device);
+  } catch {
+    // Capability projection is advisory. A provider facts failure must fail closed rather than
+    // reconstructing support from the retired capability matrix.
+    return undefined;
+  }
 }
 
 async function resolveAppsRuntime(params: {

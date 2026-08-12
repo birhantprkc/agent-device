@@ -34,7 +34,7 @@
 //   - Over PLATFORM PACKAGE COMPOSITION: six private metadata façades meet at the exact root
 //     composition file; premature implementation loading and forbidden cross-boundary edges fail (R13).
 //   - Over COMMAND-ATOMIC RUNTIME CUTOVERS: one parametrized gate reads the migrated-command
-//     table (appstate R22, shutdown R23, boot R20, devices R17, logs R14, network R15, record R16) and proves each command keeps
+//     table (boot R20, devices R17, logs R14, network R15, record R16) and proves each command keeps
 //     exactly one platform-execution path — retired routes, admission, modules, and widened
 //     runtime access cannot coexist with its operation-fact-derived descriptor and handler.
 // Only `(root)` is unranked among src/ zones (see `UNRANKED_ZONES` in model.ts):

@@ -3,11 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'vitest';
 import {
+  applicationLifecycleOperationFacts,
   providerRuntimeOwner,
   type DeviceRuntimeGateway,
   type PlatformRuntimeOperations,
+  type RuntimeFacts,
 } from '@agent-device/contracts/platform';
 import { createAppLogStartResult, createDurableResourceEnvelope } from '@agent-device/capture-kit';
+import type { DeviceInfo } from '@agent-device/kernel/device';
 import { createTestAppLogLiveHandle } from '../../../src/__tests__/test-utils/app-log-live-handle.ts';
 import { assertFlatToolCall } from './assertions.ts';
 import { PROVIDER_SCENARIO_IOS_SIMULATOR } from './fixtures.ts';
@@ -199,9 +202,7 @@ function createRecordingPlatformRuntimeGateway(params: {
 }): DeviceRuntimeGateway<PlatformRuntimeOperations> {
   const owner = providerRuntimeOwner('provider-scenario', 'ios-settings');
   return {
-    inspectFacts: async () => {
-      throw new Error('unused');
-    },
+    inspectFacts: async (device) => recordingRuntimeFacts(device),
     bind: async ({ device }) => {
       if (device.platform !== 'apple' || !device.appleOs) {
         throw new TypeError('The iOS provider scenario requires an explicit Apple leaf');
@@ -210,43 +211,10 @@ function createRecordingPlatformRuntimeGateway(params: {
       return {
         device,
         owner,
-        facts: {
-          device: {
-            family: 'apple',
-            appleOs,
-            kind: device.kind,
-            ...(device.target === undefined ? {} : { target: device.target }),
-            providerMode: 'provider-runtime',
-          },
-          operations: {
-            appLogInspect: { available: true },
-            appLogDoctor: { available: true },
-            appLogStart: { available: true },
-            appLogReattach: { available: true },
-            appLogCleanup: { available: true },
-            deployApp: unavailableRecording,
-            materializeAppSource: unavailableRecording,
-            deployMaterializedApp: unavailableRecording,
-            sendPushNotification: unavailableRecording,
-            appState: {
-              available: false,
-              reason: 'unsupported-provider-mode',
-            },
-            networkDump: {
-              available: false,
-              reason: 'unsupported-provider-mode',
-            },
-            screenRecordingStart: unavailableRecording,
-            screenRecordingReattach: unavailableRecording,
-            screenRecordingCleanup: unavailableRecording,
-            ensureReady: { available: true },
-            bootTarget: unavailableRecording,
-            bootTargetHeadless: unavailableRecording,
-            listApps: unavailableRecording,
-            shutdownTarget: unavailableRecording,
-          },
-        },
+        facts: recordingRuntimeFacts(device),
         operations: {
+          ensureReady: async () => ({ ...device, booted: true }),
+          bootTarget: async () => ({ ...device, booted: true }),
           appLogInspect: async () => ({ backend: 'ios-simulator' }),
           appLogDoctor: async () => ({
             backend: 'ios-simulator',
@@ -312,6 +280,15 @@ function createRecordingPlatformRuntimeGateway(params: {
           },
           appLogReattach: async () => ({ status: 'missing' }),
           appLogCleanup: async () => ({ status: 'already-missing' }),
+          resolveOpenTarget: async (input) => ({
+            appBundleId: input.target ?? input.currentAppBundleId,
+            appName: input.target,
+          }),
+          prepareApplicationOpen: async () => {},
+          openApplication: async (input) => ({
+            appBundleId: input.appBundleId ?? input.target,
+            timing: {},
+          }),
         },
         [Symbol.asyncDispose]: async () => {},
       };
@@ -320,7 +297,50 @@ function createRecordingPlatformRuntimeGateway(params: {
   };
 }
 
+function recordingRuntimeFacts(device: DeviceInfo): RuntimeFacts<PlatformRuntimeOperations> {
+  if (device.platform !== 'apple' || !device.appleOs) {
+    throw new TypeError('The iOS provider scenario requires an explicit Apple leaf');
+  }
+  return {
+    device: {
+      family: 'apple' as const,
+      appleOs: device.appleOs,
+      kind: device.kind,
+      ...(device.target === undefined ? {} : { target: device.target }),
+      providerMode: 'provider-runtime' as const,
+    },
+    operations: {
+      appLogInspect: available,
+      appLogDoctor: available,
+      appLogStart: available,
+      appLogReattach: available,
+      appLogCleanup: available,
+      appState: { available: false, reason: 'unsupported-provider-mode' },
+      networkDump: unavailableRecording,
+      screenRecordingStart: unavailableRecording,
+      screenRecordingReattach: unavailableRecording,
+      screenRecordingCleanup: unavailableRecording,
+      ensureReady: available,
+      bootTarget: available,
+      bootTargetHeadless: unavailableRecording,
+      listApps: unavailableRecording,
+      ...applicationLifecycleOperationFacts({
+        resolveOpenTarget: available,
+        prepareApplicationOpen: available,
+        openApplication: available,
+        applyRuntimeHints: unavailableRecording,
+        clearRuntimeHints: unavailableRecording,
+        closeApplication: unavailableRecording,
+        finalizeApplicationClose: unavailableRecording,
+        prepareAppleRunner: unavailableRecording,
+        configureProviderPortReverse: unavailableRecording,
+      }),
+    },
+  };
+}
+
 const unavailableRecording = Object.freeze({
   available: false as const,
   reason: 'unsupported-provider-mode' as const,
 });
+const available = Object.freeze({ available: true } as const);

@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { expect, test, vi } from 'vitest';
-import type { NetworkProviderDump, PlatformRuntimeHost } from '@agent-device/contracts/platform';
+import type {
+  DeviceBinding,
+  NetworkProviderDump,
+  PlatformRuntimeHost,
+  PlatformRuntimeOperations,
+} from '@agent-device/contracts/platform';
+import type { Interactor } from '@agent-device/contracts/interaction';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { createWebPlatformRuntime } from './runtime.ts';
 
@@ -37,25 +43,11 @@ test('preserves a narrow web provider dump including empty successful entries', 
     reason: 'unsupported-platform-leaf',
   });
   expect(binding.facts.operations.networkDump).toEqual({ available: true });
-  for (const operation of [
-    'deployApp',
-    'materializeAppSource',
-    'deployMaterializedApp',
-    'sendPushNotification',
-  ] as const) {
-    expect(binding.facts.operations[operation]).toMatchObject({
-      available: false,
-      reason: 'unsupported-platform-leaf',
-    });
-  }
   expect(binding.facts.operations.ensureReady).toMatchObject({ available: false });
   expect(binding.facts.operations.bootTarget).toMatchObject({ available: false });
   expect(binding.facts.operations.bootTargetHeadless).toMatchObject({ available: false });
   expect(binding.facts.operations.listApps).toMatchObject({ available: false });
-  expect(binding.facts.operations.shutdownTarget).toMatchObject({
-    available: false,
-    reason: 'unsupported-platform-leaf',
-  });
+  expectLifecycleFacts(binding);
 });
 
 test('keeps a web transport without dumpNetwork unavailable instead of throwing a stub', async () => {
@@ -70,6 +62,7 @@ test('keeps a web transport without dumpNetwork unavailable instead of throwing 
     reason: 'owner-capability-missing',
     hint: 'network is not supported by this web provider',
   });
+  expectLifecycleFacts(binding);
 });
 
 test('binds agent-browser recording only through the focused web transport', async () => {
@@ -100,6 +93,7 @@ test('binds agent-browser recording only through the focused web transport', asy
   await started.pendingHandle.transfer().forceCleanup();
   expect(calls).toEqual(['start:/tmp/recording.webm', 'stop']);
   expect(binding.facts.operations.screenRecordingStart).toEqual({ available: true });
+  expectLifecycleFacts(binding);
 });
 
 test('does not advertise recording without the active agent-browser transport', async () => {
@@ -113,7 +107,65 @@ test('does not advertise recording without the active agent-browser transport', 
     available: false,
     reason: 'owner-capability-missing',
   });
+  expectLifecycleFacts(binding);
 });
+
+test.each([
+  { name: 'emulator', device: { ...device, id: 'web-emulator', kind: 'emulator' as const } },
+  { name: 'simulator', device: { ...device, id: 'web-simulator', kind: 'simulator' as const } },
+])(
+  'fails closed for a non-browser web $name instead of inheriting the device lifecycle facet',
+  async ({ device: runtimeDevice }) => {
+    const binding = await createWebPlatformRuntime(host({ mode: 'transport-composed' })).bind({
+      device: runtimeDevice,
+      intent: { kind: 'ordinary' },
+      scope: scope(),
+    });
+    expectLifecycleFacts(binding, {
+      openTarget: false,
+      prepareAppleRunner: false,
+      closeTarget: false,
+      runtimeHints: false,
+      portReverse: false,
+    });
+  },
+);
+
+type LegacyLifecycleCell = Readonly<{
+  openTarget: boolean;
+  prepareAppleRunner: boolean;
+  closeTarget: boolean;
+  runtimeHints: boolean;
+  portReverse: boolean;
+}>;
+
+function expectLifecycleFacts(
+  binding: DeviceBinding<PlatformRuntimeOperations>,
+  // Independent legacy descriptor/dispatch cell for web.device. Runtime hints and prepare were
+  // never callable web operations, even though open and close share this runtime owner.
+  legacy: LegacyLifecycleCell = {
+    openTarget: true,
+    prepareAppleRunner: false,
+    closeTarget: true,
+    runtimeHints: false,
+    portReverse: false,
+  },
+): void {
+  const operations = [
+    ['openTarget', ['resolveOpenTarget', 'prepareApplicationOpen', 'openApplication']],
+    ['prepareAppleRunner', ['prepareAppleRunner']],
+    ['closeTarget', ['closeApplication', 'finalizeApplicationClose']],
+    ['runtimeHints', ['applyRuntimeHints', 'clearRuntimeHints']],
+    ['portReverse', ['configureProviderPortReverse']],
+  ] as const;
+  for (const [facet, names] of operations) {
+    for (const name of names) {
+      expect(binding.facts.operations[name].available).toBe(legacy[facet]);
+      if (legacy[facet]) expect(binding.operations[name]).toBeTypeOf('function');
+      else expect(binding.operations[name]).toBeUndefined();
+    }
+  }
+}
 
 function input() {
   return {
@@ -193,17 +245,17 @@ function host(
     },
     deviceReadiness: {
       applePhysical: { ensureConnected: async () => {} },
-      appleAutomation: { keepHot: () => {} },
+      appleAutomation: { keepHot: () => {}, markBooted: () => {} },
       androidEmulator: { discover: async () => [], launch: () => 1, terminate: async () => {} },
     },
-    deviceShutdown: {
-      apple: {
-        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
-      },
-      android: {
-        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
-      },
+    localInteractors: { resolve: async () => ({}) as Interactor },
+    applicationResources: {
+      recoverStartupResources: async () => {},
+      detachForDaemonShutdown: async () => {},
+      finalizeDaemonShutdown: async () => {},
     },
+    appleApplications: {} as PlatformRuntimeHost['appleApplications'],
+    androidApplications: {} as PlatformRuntimeHost['androidApplications'],
     screenRecording: {
       outputs: { prepare: async () => {} },
       apple: {

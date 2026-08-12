@@ -1,15 +1,29 @@
 import type { PlatformRuntimeHost } from '@agent-device/contracts/platform';
 import { isMacOs, type DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
-import { getSimulatorState, simctlArgs } from '../simulator-state.ts';
+
+/** Readiness reads exactly these host ports; the lifecycle binding composes the same subset. */
+export type AppleReadinessHost = Pick<
+  PlatformRuntimeHost,
+  'appleTools' | 'commands' | 'deviceReadiness'
+>;
 
 const BOOT_TIMEOUT_MS = 120_000;
 const LIST_TIMEOUT_MS = 15_000;
 
+export type AppleReadinessOptions = Readonly<{
+  /**
+   * Runs when this call is about to cold-boot the simulator. `open` uses it to start warming the
+   * runner cache in parallel with the boot, which is the whole reason the hook exists.
+   */
+  onColdBootStart?: () => void;
+}>;
+
 export async function ensureAppleReady(
-  host: PlatformRuntimeHost,
+  host: AppleReadinessHost,
   device: DeviceInfo,
   signal: AbortSignal,
+  options: AppleReadinessOptions = {},
 ): Promise<DeviceInfo> {
   signal.throwIfAborted();
   if (isMacOs(device)) return { ...device, booted: true };
@@ -19,18 +33,21 @@ export async function ensureAppleReady(
   }
   if (device.kind !== 'simulator') return { ...device, booted: true };
 
-  const state = await getSimulatorState(host.appleTools, device, signal, LIST_TIMEOUT_MS);
+  const state = await simulatorState(host, device, signal);
   if (state !== 'Booted') {
+    options.onColdBootStart?.();
     host.deviceReadiness.appleAutomation.keepHot(device);
     await bootSimulator(host, device, signal);
     await showSimulator(host, signal);
   }
   host.deviceReadiness.appleAutomation.keepHot(device);
+  // Publish the fresh observation so the boot checks later in this flow skip their own listing.
+  host.deviceReadiness.appleAutomation.markBooted(device);
   return { ...device, booted: true };
 }
 
 async function bootSimulator(
-  host: PlatformRuntimeHost,
+  host: AppleReadinessHost,
   device: DeviceInfo,
   signal: AbortSignal,
 ): Promise<void> {
@@ -72,7 +89,7 @@ async function bootSimulator(
         exitCode: status.exitCode,
       });
     }
-    if ((await getSimulatorState(host.appleTools, device, signal, LIST_TIMEOUT_MS)) !== 'Booted') {
+    if ((await simulatorState(host, device, signal)) !== 'Booted') {
       throw new AppError('COMMAND_FAILED', 'Simulator is still booting', { deviceId: device.id });
     }
   } catch (error) {
@@ -82,14 +99,47 @@ async function bootSimulator(
   }
 }
 
-async function showSimulator(host: PlatformRuntimeHost, signal: AbortSignal): Promise<void> {
+async function simulatorState(
+  host: AppleReadinessHost,
+  device: DeviceInfo,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const result = await host.appleTools.run(
+    {
+      tool: 'simctl',
+      args: simctlArgs(device, ['list', 'devices', '-j']),
+      allowFailure: true,
+      timeoutMs: LIST_TIMEOUT_MS,
+    },
+    signal,
+  );
+  if (result.exitCode !== 0) return null;
+  try {
+    const payload = JSON.parse(result.stdout) as {
+      devices: Record<string, Array<{ udid: string; state: string }>>;
+    };
+    return (
+      Object.values(payload.devices)
+        .flat()
+        .find(({ udid }) => udid === device.id)?.state ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function simctlArgs(device: DeviceInfo, args: readonly string[]): string[] {
+  return device.simulatorSetPath ? ['--set', device.simulatorSetPath, ...args] : [...args];
+}
+
+async function showSimulator(host: AppleReadinessHost, signal: AbortSignal): Promise<void> {
   await host.commands.run(
     { executable: 'open', args: ['-a', 'Simulator'], allowFailure: true, timeoutMs: 10_000 },
     signal,
   );
 }
 
-function scheduleSimulatorShutdown(host: PlatformRuntimeHost, device: DeviceInfo): void {
+function scheduleSimulatorShutdown(host: AppleReadinessHost, device: DeviceInfo): void {
   void host.appleTools
     .run({ tool: 'simctl', args: simctlArgs(device, ['shutdown', device.id]), allowFailure: true })
     .catch(() => {});

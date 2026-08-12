@@ -13,16 +13,20 @@ import { openAppLogOutput, readAppLogOutputTail } from './platform-runtime-app-l
 import { createManagedAppLogProcesses } from './platform-runtime-app-log-process.ts';
 import { createNetworkRuntimeHost } from './platform-runtime-network-host.ts';
 import { createScreenRecordingRuntimeHost } from './platform-runtime-screen-recording-host.ts';
-import { createAppInventoryRuntimeHost } from './platform-runtime-app-inventory-host.ts';
 import { createApplePhysicalReadinessHost } from './platform-runtime-apple-physical-readiness.ts';
 import { createAppleAutomationKeepHotHost } from './platform-runtime-apple-automation-keep-hot.ts';
 import { createAndroidEmulatorHost } from './platform-runtime-android-emulator-host.ts';
+import { createAppInventoryRuntimeHost } from './platform-runtime-app-inventory-host.ts';
 import { createAppStateRuntimeHost } from './platform-runtime-app-state-host.ts';
 import { createDeviceShutdownRuntimeHost } from './platform-runtime-device-shutdown-host.ts';
 import { createAppleAppDeploymentExecutor } from './platform-runtime-apple-deployment-executor.ts';
 import { createAndroidAppDeploymentExecutor } from './platform-runtime-android-deployment-executor.ts';
 import { createTemporaryTextFile } from './platform-runtime-host.ts';
 import { createAndroidToolHost } from './platform-runtime-android-tool-host.ts';
+import { createAppleApplicationTools } from './platform-runtime-apple-application-tools.ts';
+import { createAndroidApplicationTools } from './platform-runtime-android-application-tools.ts';
+import { createLocalApplicationInteractorHost } from './platform-runtime-local-application-interactors.ts';
+import { createApplicationResourceLifecycle } from './platform-runtime-application-resources.ts';
 
 export function createPlatformRuntimeHost(options: {
   sessionsDir: string;
@@ -55,6 +59,8 @@ export function createPlatformRuntimeHost(options: {
       return await resolveWebNetworkTransport(device);
     },
   });
+  const appleApplications = createAppleApplicationTools();
+  const androidApplications = createAndroidApplicationTools();
   return Object.freeze({
     commands,
     appleTools,
@@ -98,6 +104,13 @@ export function createPlatformRuntimeHost(options: {
       options.shutdownLoaders,
     ),
     screenRecording: createScreenRecordingRuntimeHost(),
+    localInteractors: createLocalApplicationInteractorHost(),
+    appleApplications,
+    androidApplications,
+    applicationResources: createApplicationResourceLifecycle({
+      android: androidApplications,
+      apple: appleApplications,
+    }),
     clock: Object.freeze({
       now: () => Date.now(),
       sleep: async (milliseconds: number, signal?: AbortSignal) => {

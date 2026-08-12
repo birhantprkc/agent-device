@@ -57,17 +57,6 @@ test.each([
     reason: 'unsupported-platform-leaf',
   });
   expect(facts.operations.appLogInspect).toEqual({ available: true });
-  expect(facts.operations.deployApp).toEqual({ available: true });
-  for (const operation of [
-    'materializeAppSource',
-    'deployMaterializedApp',
-    'sendPushNotification',
-  ] as const) {
-    expect(facts.operations[operation]).toMatchObject({
-      available: false,
-      reason: 'unsupported-platform-leaf',
-    });
-  }
   expect(facts.operations.screenRecordingStart.available).toBe(recordingAvailable);
   expect(facts.operations.screenRecordingReattach.available).toBe(recordingAvailable);
   expect(facts.operations.screenRecordingCleanup.available).toBe(recordingAvailable);
@@ -76,10 +65,6 @@ test.each([
   expect(facts.operations.bootTarget).toMatchObject({ available: false });
   expect(facts.operations.bootTargetHeadless).toMatchObject({ available: false });
   expect(facts.operations.listApps).toEqual({ available: true });
-  expect(facts.operations.shutdownTarget).toMatchObject({
-    available: false,
-    reason: 'unsupported-platform-leaf',
-  });
   await expect(binding.operations.ensureReady?.({})).resolves.toMatchObject({ booted: true });
   await expect(
     binding.operations.listApps?.({ device: runtimeDevice, filter: 'all' }),

@@ -1,5 +1,6 @@
 import { expect, test, vi } from 'vitest';
 import {
+  applicationLifecycleOperationFacts,
   localRuntimeOwner,
   PendingTransferGuard,
   type DeviceBinding,
@@ -162,10 +163,6 @@ function makeRecordingGateway(firstStartBlocked: Promise<void>) {
           appLogStart: unavailable,
           appLogReattach: unavailable,
           appLogCleanup: unavailable,
-          deployApp: unavailable,
-          materializeAppSource: unavailable,
-          deployMaterializedApp: unavailable,
-          sendPushNotification: unavailable,
           appState: unavailable,
           networkDump: unavailable,
           screenRecordingStart: { available: true },
@@ -175,7 +172,17 @@ function makeRecordingGateway(firstStartBlocked: Promise<void>) {
           bootTarget: unavailable,
           bootTargetHeadless: unavailable,
           listApps: unavailable,
-          shutdownTarget: unavailable,
+          ...applicationLifecycleOperationFacts({
+            resolveOpenTarget: unavailable,
+            prepareApplicationOpen: unavailable,
+            openApplication: unavailable,
+            applyRuntimeHints: unavailable,
+            clearRuntimeHints: unavailable,
+            closeApplication: unavailable,
+            finalizeApplicationClose: unavailable,
+            prepareAppleRunner: unavailable,
+            configureProviderPortReverse: unavailable,
+          }),
         },
       },
       operations: {

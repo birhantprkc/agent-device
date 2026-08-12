@@ -1,5 +1,9 @@
 import { expect, test, vi } from 'vitest';
-import type { PlatformRuntimeOperations, RuntimeFacts } from '@agent-device/contracts/platform';
+import type {
+  DeviceBinding,
+  PlatformRuntimeOperations,
+  RuntimeFacts,
+} from '@agent-device/contracts/platform';
 import type { AppleOS, DeviceInfo } from '@agent-device/kernel/device';
 import { createApplePlatformRuntime } from './runtime.ts';
 import { platformRuntimeHostFixture } from './runtime.fixtures.ts';
@@ -55,39 +59,18 @@ test.each([
       progress: { report: () => {} },
     },
   });
-  assertAppleDeploymentFacts(binding, device);
-  assertAppleAppLogAndRecordingFacts(binding.facts, device, available, hint);
-  assertAppleReadinessFacts(binding.facts, device);
-});
-
-function assertAppleDeploymentFacts(
-  binding: Awaited<ReturnType<ReturnType<typeof createApplePlatformRuntime>['bind']>>,
-  device: DeviceInfo,
-): void {
   const { facts } = binding;
   expect(facts.device.providerMode).toBe('local');
+  expect(facts.operations.appState).toEqual({
+    available: false,
+    reason: 'unsupported-platform-leaf',
+    hint: expect.stringContaining('session state'),
+  });
+  expect(binding.operations.appState).toBeUndefined();
   expect(facts.operations.networkDump).toEqual({ available: true });
   expect(facts.operations.listApps.available).toBe(
     device.appleOs !== 'watchos' && device.iosPhysicalDeviceBackend !== 'xctest',
   );
-  const deploymentAvailable =
-    device.appleOs !== 'macos' &&
-    device.appleOs !== 'watchos' &&
-    !(device.kind === 'device' && device.iosPhysicalDeviceBackend === 'xctest');
-  for (const operation of ['deployApp', 'materializeAppSource', 'deployMaterializedApp'] as const) {
-    expect(facts.operations[operation].available).toBe(deploymentAvailable);
-  }
-  expect(facts.operations.sendPushNotification.available).toBe(
-    device.appleOs !== 'macos' && device.appleOs !== 'watchos' && device.kind === 'simulator',
-  );
-}
-
-function assertAppleAppLogAndRecordingFacts(
-  facts: RuntimeFacts<PlatformRuntimeOperations>,
-  device: DeviceInfo,
-  available: boolean,
-  hint: string | undefined,
-): void {
   for (const operation of ['appLogInspect', 'appLogDoctor', 'appLogStart'] as const) {
     const fact = facts.operations[operation];
     expect(fact.available).toBe(available);
@@ -110,52 +93,12 @@ function assertAppleAppLogAndRecordingFacts(
       hint: 'watchOS recording is not supported.',
     });
   }
-}
-
-function assertAppleReadinessFacts(
-  facts: RuntimeFacts<PlatformRuntimeOperations>,
-  device: DeviceInfo,
-): void {
   expect(facts.operations.ensureReady.available).toBe(device.appleOs !== 'watchos');
   expect(facts.operations.bootTarget.available).toBe(
     device.appleOs !== 'macos' && device.appleOs !== 'watchos',
   );
   expect(facts.operations.bootTargetHeadless.available).toBe(false);
-}
-
-test.each([
-  ['iOS simulator', leaves.ios, true, undefined],
-  ['iOS physical CoreDevice', appleDevice({ kind: 'device' }), false, 'unsupported-device-kind'],
-  ['iPadOS simulator', leaves.ipados, true, undefined],
-  ['tvOS simulator', leaves.tvos, true, undefined],
-  ['macOS host', leaves.macos, false, 'unsupported-platform-leaf'],
-  ['visionOS simulator', leaves.visionos, true, undefined],
-  ['watchOS sentinel', leaves.watchos, false, 'unsupported-platform-leaf'],
-])('classifies shutdown availability for the %s leaf', async (_name, device, available, reason) => {
-  const facts = await appleFacts(device);
-  expect(facts.operations.shutdownTarget.available).toBe(available);
-  if (reason) expect(facts.operations.shutdownTarget).toMatchObject({ reason });
 });
-
-async function appleFacts(device: DeviceInfo) {
-  const binding = await createApplePlatformRuntime(platformRuntimeHostFixture()).bind({
-    device,
-    intent: { kind: 'ordinary' },
-    scope: {
-      signal: new AbortController().signal,
-      diagnostics: { emit: () => {} },
-      progress: { report: () => {} },
-    },
-  });
-  const { facts } = binding;
-  expect(facts.operations.appState).toEqual({
-    available: false,
-    reason: 'unsupported-platform-leaf',
-    hint: expect.stringContaining('session state'),
-  });
-  expect(binding.operations.appState).toBeUndefined();
-  return facts;
-}
 
 test('readiness and boot keep the Apple automation helper warm inside the platform runtime', async () => {
   const host = platformRuntimeHostFixture();
@@ -179,7 +122,7 @@ test('readiness and boot keep the Apple automation helper warm inside the platfo
     },
     deviceReadiness: {
       ...host.deviceReadiness,
-      appleAutomation: { keepHot },
+      appleAutomation: { keepHot, markBooted: vi.fn() },
     },
   });
   const device = appleDevice({ booted: false });
@@ -252,3 +195,157 @@ test('routes Apple app inventory through the injected host facet', async () => {
   ]);
   expect(listApps).toHaveBeenCalledWith(device, 'all', expect.any(AbortSignal));
 });
+
+type LegacyLifecycleCell = Readonly<{
+  openTarget: boolean;
+  prepareAppleRunner: boolean;
+  closeTarget: boolean;
+  runtimeHints: boolean;
+  portReverse: boolean;
+}>;
+
+const LEGACY_IOS_SIMULATOR: LegacyLifecycleCell = {
+  openTarget: true,
+  prepareAppleRunner: true,
+  closeTarget: true,
+  runtimeHints: true,
+  portReverse: false,
+};
+const LEGACY_APPLE_DEVICE: LegacyLifecycleCell = {
+  openTarget: true,
+  prepareAppleRunner: true,
+  closeTarget: true,
+  runtimeHints: false,
+  portReverse: false,
+};
+const LEGACY_UNSUPPORTED: LegacyLifecycleCell = {
+  openTarget: false,
+  prepareAppleRunner: false,
+  closeTarget: false,
+  runtimeHints: false,
+  portReverse: false,
+};
+
+// The legacy descriptor/dispatch oracle is leaf- and kind-specific. Keep the full current
+// denominator here instead of deriving it from Apple family ownership or a sibling operation.
+const LEGACY_APPLE_LIFECYCLE_CELLS = {
+  ios: {
+    simulator: LEGACY_IOS_SIMULATOR,
+    emulator: LEGACY_UNSUPPORTED,
+    device: LEGACY_APPLE_DEVICE,
+  },
+  ipados: {
+    simulator: LEGACY_IOS_SIMULATOR,
+    emulator: LEGACY_UNSUPPORTED,
+    device: LEGACY_APPLE_DEVICE,
+  },
+  tvos: {
+    simulator: LEGACY_IOS_SIMULATOR,
+    emulator: LEGACY_UNSUPPORTED,
+    device: LEGACY_APPLE_DEVICE,
+  },
+  macos: {
+    simulator: LEGACY_APPLE_DEVICE,
+    emulator: LEGACY_UNSUPPORTED,
+    device: LEGACY_APPLE_DEVICE,
+  },
+  visionos: {
+    simulator: LEGACY_IOS_SIMULATOR,
+    emulator: LEGACY_UNSUPPORTED,
+    device: LEGACY_APPLE_DEVICE,
+  },
+  watchos: {
+    simulator: LEGACY_UNSUPPORTED,
+    emulator: LEGACY_UNSUPPORTED,
+    device: LEGACY_UNSUPPORTED,
+  },
+} satisfies Record<AppleOS, Record<DeviceInfo['kind'], LegacyLifecycleCell>>;
+
+const APPLE_LEAF_TARGETS = {
+  ios: 'mobile',
+  ipados: 'mobile',
+  tvos: 'tv',
+  macos: 'desktop',
+  visionos: 'mobile',
+  watchos: 'mobile',
+} satisfies Record<AppleOS, NonNullable<DeviceInfo['target']>>;
+
+const appleLifecycleDenominator = (
+  Object.entries(LEGACY_APPLE_LIFECYCLE_CELLS) as Array<
+    [AppleOS, Record<DeviceInfo['kind'], LegacyLifecycleCell>]
+  >
+).flatMap(([appleOs, cells]) =>
+  (Object.entries(cells) as Array<[DeviceInfo['kind'], LegacyLifecycleCell]>).map(
+    ([kind, legacy]) => ({
+      name: `${appleOs} ${kind}`,
+      device: appleDevice({
+        appleOs,
+        id: `apple-${appleOs}-${kind}`,
+        kind,
+        target: APPLE_LEAF_TARGETS[appleOs],
+      }),
+      legacy,
+    }),
+  ),
+);
+
+function expectLegacyLifecycleCell(
+  binding: DeviceBinding<PlatformRuntimeOperations>,
+  legacy: LegacyLifecycleCell,
+): void {
+  expectLegacyLifecycleFactCell(binding.facts, legacy);
+  const operations = [
+    ['openTarget', ['resolveOpenTarget', 'prepareApplicationOpen', 'openApplication']],
+    ['prepareAppleRunner', ['prepareAppleRunner']],
+    ['closeTarget', ['closeApplication', 'finalizeApplicationClose']],
+    ['runtimeHints', ['applyRuntimeHints', 'clearRuntimeHints']],
+    ['portReverse', ['configureProviderPortReverse']],
+  ] as const;
+  for (const [facet, names] of operations) {
+    for (const name of names) {
+      if (legacy[facet]) {
+        expect(binding.operations[name]).toBeTypeOf('function');
+      } else {
+        expect(binding.operations[name]).toBeUndefined();
+      }
+    }
+  }
+}
+
+test.each(appleLifecycleDenominator)(
+  'publishes independent lifecycle facts for every Apple $name descriptor/dispatch cell',
+  async ({ device, legacy }) => {
+    const runtime = createApplePlatformRuntime(platformRuntimeHostFixture());
+    expectLegacyLifecycleFactCell(await runtime.inspectFacts(device), legacy);
+    expectLegacyLifecycleCell(
+      await runtime.bind({
+        device,
+        intent: { kind: 'ordinary' },
+        scope: {
+          signal: new AbortController().signal,
+          diagnostics: { emit: () => {} },
+          progress: { report: () => {} },
+        },
+      }),
+      legacy,
+    );
+  },
+);
+
+function expectLegacyLifecycleFactCell(
+  facts: RuntimeFacts<PlatformRuntimeOperations>,
+  legacy: LegacyLifecycleCell,
+): void {
+  const operations = [
+    ['openTarget', ['resolveOpenTarget', 'prepareApplicationOpen', 'openApplication']],
+    ['prepareAppleRunner', ['prepareAppleRunner']],
+    ['closeTarget', ['closeApplication', 'finalizeApplicationClose']],
+    ['runtimeHints', ['applyRuntimeHints', 'clearRuntimeHints']],
+    ['portReverse', ['configureProviderPortReverse']],
+  ] as const;
+  for (const [facet, names] of operations) {
+    for (const name of names) {
+      expect(facts.operations[name].available).toBe(legacy[facet]);
+    }
+  }
+}

@@ -3,21 +3,25 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'vitest';
 import type { DeviceLease } from '@agent-device/contracts/device';
-import type { DaemonRequest } from '../../../src/daemon/types.ts';
 import { assertRpcError, assertRpcOk } from './assertions.ts';
-import {
-  createFakeProviderWorld,
-  DEVTOOLS_PORT_REVERSE,
-  FAKE_PROVIDER,
-  type FakeProviderCall,
-  type FakeProviderDeviceRuntime,
-} from './provider-device-runtime.fixtures.ts';
 import {
   createProviderScenarioHarness,
   withProviderScenarioResource,
   withProviderScenarioTempDir,
 } from './harness.ts';
+import {
+  FAKE_PROVIDER,
+  type FakeProviderCall,
+  FakeProviderDeviceRuntime,
+  createFakeProviderWorld,
+  iosLeaseFlags,
+  iosLeaseMeta,
+  leaseFlags,
+  leaseMeta,
+} from './provider-device-runtime.fixtures.ts';
 import { runProviderScenario, type ProviderScenarioStep } from './scenario.ts';
+
+const DEVTOOLS_PORT_REVERSE = { devicePort: 8097, hostPort: 8097, portReverseName: 'devtools' };
 
 test('Provider-backed scenario composes lease, inventory, dispatch, and port reverse providers', async () => {
   await withProviderScenarioResource(createFakeProviderWorld, async ({ daemon, runtime }) => {
@@ -263,34 +267,4 @@ function assertFakeProviderCallOrder(calls: FakeProviderCall[]): void {
       'lease.release',
     ],
   );
-}
-
-function leaseFlags(leaseId?: string): DaemonRequest['flags'] {
-  return {
-    platform: 'android',
-    tenant: 'team-a',
-    runId: 'run-a',
-    leaseId,
-    leaseProvider: FAKE_PROVIDER,
-  };
-}
-
-function leaseMeta(leaseId?: string): DaemonRequest['meta'] {
-  return {
-    tenantId: 'team-a',
-    runId: 'run-a',
-    leaseId,
-    leaseBackend: 'android-instance',
-    leaseProvider: FAKE_PROVIDER,
-    deviceKey: 'android-a',
-    clientId: 'client-a',
-  };
-}
-
-function iosLeaseFlags(leaseId?: string): DaemonRequest['flags'] {
-  return { ...leaseFlags(leaseId), platform: 'ios' };
-}
-
-function iosLeaseMeta(leaseId?: string): DaemonRequest['meta'] {
-  return { ...leaseMeta(leaseId), leaseBackend: 'ios-instance', deviceKey: 'ios-a' };
 }

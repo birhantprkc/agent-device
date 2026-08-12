@@ -5,19 +5,29 @@ import type {
   PlatformRuntimeOperations,
   PlatformRuntimeOwner,
 } from '@agent-device/contracts/platform';
-import { localRuntimeOwner } from '@agent-device/contracts/platform';
-import { isIosFamily, isMacOs, type DeviceInfo } from '@agent-device/kernel/device';
+import {
+  applicationLifecycleOperationFacts,
+  availableApplicationLifecycleOperations,
+  localRuntimeOwner,
+} from '@agent-device/contracts/platform';
+import {
+  isIosFamily,
+  isMacOs,
+  resolveDeviceAppleOs,
+  type DeviceInfo,
+} from '@agent-device/kernel/device';
 import { createAppleAppLogRuntime } from './logs/runtime.ts';
 import { dumpAppleNetworkTraffic } from './network/runtime.ts';
 import {
   appleScreenRecordingFacts,
   createAppleScreenRecordingOperations,
 } from './recording/runtime.ts';
+import { ensureAppleReady } from './readiness/runtime.ts';
+import { bindAppleApplicationLifecycle } from './lifecycle.ts';
 import {
   appleAppDeploymentFacts,
   createAppleAppDeploymentOperations,
 } from './deployment/runtime.ts';
-import { ensureAppleReady } from './readiness/runtime.ts';
 
 const owner = localRuntimeOwner('apple');
 const available = Object.freeze({ available: true } as const);
@@ -35,6 +45,47 @@ const headlessUnavailable = Object.freeze({
   reason: 'unsupported-provider-mode',
   hint: 'Headless boot is supported only for local Android emulators.',
 } as const);
+const watchOpenTargetUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-platform-leaf',
+  hint: 'watchOS open is not supported because XCUITest cannot drive watchOS UI.',
+} as const);
+const watchPrepareUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-platform-leaf',
+  hint: 'watchOS runner preparation is not supported because XCUITest cannot drive watchOS UI.',
+} as const);
+const watchCloseTargetUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-platform-leaf',
+  hint: 'watchOS close is not supported because XCUITest cannot drive watchOS UI.',
+} as const);
+const runtimeHintsUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'Runtime hints are supported only for local iOS-family simulators and Android devices.',
+} as const);
+
+const appleOpenTargetKindUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'open is supported only for Apple simulators and devices.',
+} as const);
+const applePrepareKindUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'prepare is supported only for Apple simulators and devices.',
+} as const);
+const appleCloseTargetKindUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'close is supported only for Apple simulators and devices.',
+} as const);
+const portReverseUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-provider-mode',
+  hint: 'Port reverse is supported only by an owning provider runtime.',
+} as const);
 const shutdownKindUnavailable = Object.freeze({
   available: false,
   reason: 'unsupported-device-kind',
@@ -44,6 +95,53 @@ const shutdownKindUnavailable = Object.freeze({
 function shutdownFact(device: DeviceInfo) {
   if (!isIosFamily(device) || device.appleOs === 'watchos') return unavailable;
   return device.kind === 'simulator' ? available : shutdownKindUnavailable;
+}
+
+function appleApplicationLifecycleFacts(device: DeviceInfo) {
+  const openTarget = appleOpenTargetFact(device);
+  const prepareAppleRunner = applePrepareAppleRunnerFact(device);
+  const closeTarget = appleCloseTargetFact(device);
+  const runtimeHints = appleRuntimeHintsFact(device);
+  return applicationLifecycleOperationFacts({
+    resolveOpenTarget: openTarget,
+    prepareApplicationOpen: openTarget,
+    openApplication: openTarget,
+    applyRuntimeHints: runtimeHints,
+    clearRuntimeHints: runtimeHints,
+    closeApplication: closeTarget,
+    finalizeApplicationClose: closeTarget,
+    prepareAppleRunner,
+    configureProviderPortReverse: portReverseUnavailable,
+  });
+}
+
+function appleOpenTargetFact(device: DeviceInfo) {
+  if (resolveDeviceAppleOs(device) === 'watchos') return watchOpenTargetUnavailable;
+  return device.kind === 'simulator' || device.kind === 'device'
+    ? available
+    : appleOpenTargetKindUnavailable;
+}
+
+function applePrepareAppleRunnerFact(device: DeviceInfo) {
+  if (resolveDeviceAppleOs(device) === 'watchos') return watchPrepareUnavailable;
+  return device.kind === 'simulator' || device.kind === 'device'
+    ? available
+    : applePrepareKindUnavailable;
+}
+
+function appleCloseTargetFact(device: DeviceInfo) {
+  if (resolveDeviceAppleOs(device) === 'watchos') return watchCloseTargetUnavailable;
+  return device.kind === 'simulator' || device.kind === 'device'
+    ? available
+    : appleCloseTargetKindUnavailable;
+}
+
+function appleRuntimeHintsFact(device: DeviceInfo) {
+  return resolveDeviceAppleOs(device) !== 'watchos' &&
+    isIosFamily(device) &&
+    device.kind === 'simulator'
+    ? available
+    : runtimeHintsUnavailable;
 }
 
 function appInventoryFacts(device: DeviceInfo) {
@@ -98,6 +196,7 @@ export function createApplePlatformRuntime(host: PlatformRuntimeHost): PlatformR
         bootTarget: boot,
         bootTargetHeadless: headlessUnavailable,
         listApps: apps,
+        ...appleApplicationLifecycleFacts(device),
         shutdownTarget: shutdownFact(device),
       },
     });
@@ -153,6 +252,14 @@ export function createApplePlatformRuntime(host: PlatformRuntimeHost): PlatformR
                   ),
               }
             : {}),
+          ...availableApplicationLifecycleOperations(
+            bindAppleApplicationLifecycle({
+              host,
+              device: request.device,
+              signal: request.scope.signal,
+            }),
+            facts.operations,
+          ),
           ...(facts.operations.shutdownTarget.available
             ? {
                 shutdownTarget: async () =>

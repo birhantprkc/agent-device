@@ -20,6 +20,13 @@ import type {
   DeviceShutdownRuntimeHost,
   DeviceShutdownRuntimeOperations,
 } from './device-shutdown-runtime.ts';
+import type {
+  AndroidApplicationTools,
+  AppleApplicationTools,
+  ApplicationLifecycleResourceLifecycle,
+  ApplicationLifecycleRuntimeOperations,
+  LocalApplicationInteractorHost,
+} from './application-lifecycle-runtime.ts';
 import {
   type DeviceRuntimeOwner,
   type RuntimeOwnerRef,
@@ -35,7 +42,8 @@ export type PlatformRuntimeOperations = AppLogRuntimeOperations &
   NetworkRuntimeOperations &
   ScreenRecordingRuntimeOperations &
   DeviceReadinessRuntimeOperations &
-  DeviceShutdownRuntimeOperations;
+  DeviceShutdownRuntimeOperations &
+  ApplicationLifecycleRuntimeOperations;
 
 /**
  * The one neutral runtime-use declaration every command domain shares (ADR 0019 §9): no
@@ -105,6 +113,10 @@ export type PlatformRuntimeHost = AppLogRuntimeHost &
     screenRecording: ScreenRecordingRuntimeHost;
     deviceReadiness: DeviceReadinessRuntimeHost;
     deviceShutdown: DeviceShutdownRuntimeHost;
+    localInteractors: LocalApplicationInteractorHost;
+    appleApplications: AppleApplicationTools;
+    androidApplications: AndroidApplicationTools;
+    applicationResources: ApplicationLifecycleResourceLifecycle;
   }>;
 
 export type PlatformRuntimeOwner = DeviceRuntimeOwner<PlatformRuntimeOperations>;

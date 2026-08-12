@@ -121,6 +121,15 @@ test('device capability matrix stays consistent across shared command groups', (
       ],
     },
     {
+      commands: ['push'],
+      checks: [
+        { device: iosSimulator, expected: true, label: 'on iOS sim' },
+        { device: iosDevice, expected: false, label: 'on iOS device' },
+        { device: androidDevice, expected: true, label: 'on Android' },
+        { device: macOsDevice, expected: false, label: 'on macOS' },
+      ],
+    },
+    {
       commands: ['keyboard'],
       checks: [
         { device: iosSimulator, expected: true, label: 'on iOS sim' },
@@ -136,6 +145,26 @@ test('device capability matrix stays consistent across shared command groups', (
         { device: androidTvEmulator, expected: true, label: 'on Android TV' },
         { device: macOsDevice, expected: false, label: 'on macOS' },
         { device: tvOsSimulator, expected: true, label: 'on tvOS simulator' },
+      ],
+    },
+    {
+      commands: ['shutdown'],
+      checks: [
+        { device: iosSimulator, expected: true, label: 'on iOS sim' },
+        { device: iosDevice, expected: false, label: 'on iOS device' },
+        { device: androidEmulator, expected: true, label: 'on Android emulator' },
+        { device: androidDevice, expected: false, label: 'on Android device' },
+        { device: macOsDevice, expected: false, label: 'on macOS' },
+        { device: tvOsSimulator, expected: true, label: 'on tvOS simulator' },
+      ],
+    },
+    {
+      commands: ['reinstall', 'install'],
+      checks: [
+        { device: iosSimulator, expected: true, label: 'on iOS sim' },
+        { device: iosDevice, expected: true, label: 'on iOS device' },
+        { device: androidDevice, expected: true, label: 'on Android' },
+        { device: macOsDevice, expected: false, label: 'on macOS' },
       ],
     },
     {
@@ -161,16 +190,15 @@ test('core commands support iOS simulator, iOS device, and Android', () => {
       'back',
       'boot',
       'click',
-      'close',
       'diff',
       'fill',
       'find',
       'focus',
       'get',
       'home',
+      'install',
       'longpress',
       'logs',
-      'open',
       'perf',
       'press',
       'record',
@@ -186,19 +214,6 @@ test('core commands support iOS simulator, iOS device, and Android', () => {
       { device: iosSimulator, expected: true, label: 'on iOS sim' },
       { device: iosDevice, expected: true, label: 'on iOS device' },
       { device: androidDevice, expected: true, label: 'on Android' },
-    ],
-  );
-});
-
-test('Android denies Apple runner preparation until a durable backend exists', () => {
-  assertCommandSupport(
-    ['prepare'],
-    [
-      { device: iosSimulator, expected: true, label: 'on iOS simulator' },
-      { device: macOsDevice, expected: true, label: 'on macOS' },
-      { device: tvOsSimulator, expected: true, label: 'on tvOS simulator' },
-      { device: androidDevice, expected: false, label: 'on Android device' },
-      { device: androidEmulator, expected: false, label: 'on Android emulator' },
     ],
   );
 });
@@ -224,7 +239,7 @@ test('viewport resizing is admitted only on web, where a backend exists', () => 
 test('capabilities reject CoreDevice-only commands for XCTest-backed devices', () => {
   // Runtime-backed logs and record admission are proven from exact device facts in
   // their handler/runtime tests, never through this legacy matrix projection.
-  const coreDeviceOnlyCommands = ['perf'];
+  const coreDeviceOnlyCommands = ['install', 'install-from-source', 'perf', 'reinstall'];
   assertCommandSupport(coreDeviceOnlyCommands, [
     { device: iosDevice, expected: true, label: 'on CoreDevice' },
     { device: xctestIosDevice, expected: false, label: 'on XCTest backend' },
@@ -233,7 +248,7 @@ test('capabilities reject CoreDevice-only commands for XCTest-backed devices', (
     assert.match(unsupportedHintForDevice(command, xctestIosDevice) ?? '', /CoreDevice-backed/);
   }
   assertCommandSupport(
-    ['close', 'open', 'screenshot', 'snapshot'],
+    ['screenshot', 'snapshot'],
     [{ device: xctestIosDevice, expected: true, label: 'on XCTest backend' }],
   );
 });
@@ -244,7 +259,6 @@ test('macOS supports the Apple runner interaction core but excludes mobile-only 
       'alert',
       'back',
       'click',
-      'close',
       'diff',
       'fill',
       'find',
@@ -253,7 +267,6 @@ test('macOS supports the Apple runner interaction core but excludes mobile-only 
       'is',
       'longpress',
       'logs',
-      'open',
       'perf',
       'press',
       'record',
@@ -270,24 +283,14 @@ test('macOS supports the Apple runner interaction core but excludes mobile-only 
     [{ device: macOsDevice, expected: true, label: 'on macOS' }],
   );
   assertCommandSupport(
-    ['app-switcher', 'home', 'orientation'],
+    ['app-switcher', 'home', 'install', 'install-from-source', 'push', 'reinstall', 'orientation'],
     [{ device: macOsDevice, expected: false, label: 'on macOS' }],
   );
 });
 
 test('tvOS follows iOS capability matrix by device kind', () => {
   assertCommandSupport(
-    [
-      'open',
-      'close',
-      'apps',
-      'screenshot',
-      'trigger-app-event',
-      'logs',
-      'reinstall',
-      'boot',
-      'shutdown',
-    ],
+    ['apps', 'screenshot', 'trigger-app-event', 'logs', 'reinstall', 'boot', 'shutdown'],
     [{ device: tvOsSimulator, expected: true, label: 'on tvOS' }],
   );
   assertCommandSupport(
@@ -307,7 +310,7 @@ test('tvOS follows iOS capability matrix by device kind', () => {
     [{ device: tvOsSimulator, expected: true, label: 'on tvOS' }],
   );
   assertCommandSupport(
-    ['settings', 'alert'],
+    ['push', 'settings', 'alert'],
     [{ device: tvOsSimulator, expected: true, label: 'on tvOS simulator' }],
   );
   assert.equal(
@@ -330,7 +333,6 @@ test('Linux supports desktop interaction commands and blocks mobile/unsupported 
       'back',
       'click',
       'clipboard',
-      'close',
       'diff',
       'fill',
       'find',
@@ -339,7 +341,6 @@ test('Linux supports desktop interaction commands and blocks mobile/unsupported 
       'home',
       'is',
       'longpress',
-      'open',
       'press',
       'screenshot',
       'scroll',
@@ -351,7 +352,20 @@ test('Linux supports desktop interaction commands and blocks mobile/unsupported 
     [{ device: linuxDevice, expected: true, label: 'on Linux' }],
   );
   assertCommandSupport(
-    ['alert', 'app-switcher', 'keyboard', 'perf', 'orientation', 'settings', 'trigger-app-event'],
+    [
+      'alert',
+      'app-switcher',
+      'install',
+      'install-from-source',
+      'keyboard',
+      'perf',
+      'push',
+      'reinstall',
+      'orientation',
+      'settings',
+      'shutdown',
+      'trigger-app-event',
+    ],
     [{ device: linuxDevice, expected: false, label: 'on Linux' }],
   );
 });
@@ -361,13 +375,11 @@ test('web supports only the initial browser interaction slice', () => {
     [
       'audio',
       'click',
-      'close',
       'fill',
       'focus',
       'find',
       'get',
       'is',
-      'open',
       'press',
       'record',
       'screenshot',
@@ -387,11 +399,16 @@ test('web supports only the initial browser interaction slice', () => {
       'diff',
       'gesture',
       'home',
+      'install',
+      'install-from-source',
       'keyboard',
       'longpress',
       'perf',
+      'push',
+      'reinstall',
       'orientation',
       'settings',
+      'shutdown',
       'swipe',
       'trigger-app-event',
     ],

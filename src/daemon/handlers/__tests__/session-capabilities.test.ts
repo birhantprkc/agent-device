@@ -10,13 +10,15 @@ import {
   makeSessionStore,
 } from '../../../__tests__/test-utils/index.ts';
 import { withTestDeviceInventoryProvider as withTargetDeviceResolutionScope } from '../../../__tests__/test-utils/device-inventory-gateways.ts';
-import { isIosFamily, type DeviceInfo } from '@agent-device/kernel/device';
+import type { DeviceInfo } from '@agent-device/kernel/device';
 import {
+  applicationLifecycleOperationFacts,
   localRuntimeOwner,
   narrowDeviceBinding,
   providerRuntimeOwner,
   type DeviceBinding,
   type PlatformRuntimeOperations,
+  type RuntimeOperationFact,
   type RuntimeProviderMode,
 } from '@agent-device/contracts/platform';
 import type {
@@ -26,6 +28,8 @@ import type {
 import { handleSessionCommands } from './session-command-harness.ts';
 
 function assertAndroidCapabilityHonesty(availableCommands: unknown): void {
+  expect(availableCommands).toContain(PUBLIC_COMMANDS.open);
+  expect(availableCommands).toContain(PUBLIC_COMMANDS.close);
   expect(availableCommands).not.toContain(PUBLIC_COMMANDS.prepare);
   expect(availableCommands).not.toContain(PUBLIC_COMMANDS.viewport);
 }
@@ -53,8 +57,8 @@ test('capabilities reports supported commands for the selected session device', 
     sessionName,
     logPath: path.join(os.tmpdir(), 'daemon.log'),
     sessionStore,
-    bindDevice: runtime.bindDevice,
     inspectFacts: runtime.inspectFacts,
+    bindDevice: runtime.bindDevice,
     invoke: async () => ({ ok: true, data: {} }),
   });
 
@@ -78,12 +82,12 @@ test('capabilities reports supported commands for the selected session device', 
       'perf',
       PUBLIC_COMMANDS.logs,
       PUBLIC_COMMANDS.gesture,
-      PUBLIC_COMMANDS.shutdown,
     ]),
   );
   expect(response.data?.availableCommands).not.toContain(PUBLIC_COMMANDS.capabilities);
   expect(response.data?.availableCommands).not.toContain(PUBLIC_COMMANDS.devices);
   assertAndroidCapabilityHonesty(response.data?.availableCommands);
+  expect(runtime.inspections).toHaveLength(1);
   expect(runtime.uses).toEqual([
     { required: [], preferred: ['appLogInspect'] },
     { required: [], preferred: ['networkDump'] },
@@ -125,17 +129,21 @@ test('capabilities excludes logs from an unavailable provider-mode XCTest runtim
     sessionName,
     logPath: path.join(os.tmpdir(), 'daemon.log'),
     sessionStore,
-    bindDevice: runtime.bindDevice,
     inspectFacts: runtime.inspectFacts,
+    bindDevice: runtime.bindDevice,
     invoke: async () => ({ ok: true, data: {} }),
   });
 
   expect(response?.ok).toBe(true);
   if (!response?.ok) return;
-  expect(response.data?.availableCommands).not.toContain(PUBLIC_COMMANDS.logs);
-  expect(response.data?.availableCommands).not.toContain(PUBLIC_COMMANDS.apps);
-  expect(response.data?.availableCommands).toContain(PUBLIC_COMMANDS.network);
-  expect(response.data?.availableCommands).not.toContain(PUBLIC_COMMANDS.shutdown);
+  const availableCommands = response.data?.availableCommands;
+  expect(availableCommands).not.toContain(PUBLIC_COMMANDS.logs);
+  expect(availableCommands).not.toContain(PUBLIC_COMMANDS.apps);
+  expect(availableCommands).toContain(PUBLIC_COMMANDS.network);
+  expect(availableCommands).not.toContain(PUBLIC_COMMANDS.open);
+  expect(availableCommands).not.toContain(PUBLIC_COMMANDS.close);
+  expect(availableCommands).not.toContain(PUBLIC_COMMANDS.prepare);
+  expect(runtime.inspections).toHaveLength(1);
   expect(runtime.uses).toEqual([
     { required: [], preferred: ['appLogInspect'] },
     { required: [], preferred: ['networkDump'] },
@@ -165,8 +173,8 @@ test('capabilities excludes network when the runtime fact is unavailable', async
     sessionName,
     logPath: path.join(os.tmpdir(), 'daemon.log'),
     sessionStore,
-    bindDevice: runtime.bindDevice,
     inspectFacts: runtime.inspectFacts,
+    bindDevice: runtime.bindDevice,
     invoke: async () => ({ ok: true, data: {} }),
   });
 
@@ -402,9 +410,18 @@ test.each([
       appName: 'Settings',
       appBundleId: 'com.example.settings',
     });
-    const inspectFacts = vi.fn(async () => {
-      throw new Error('session-owned Apple appstate must not inspect sessionless facts');
-    });
+    // The projection still reads one sessionless snapshot, because open/close/prepare/runtime
+    // availability is a runtime fact. What the session owns is the appstate answer itself, so a
+    // snapshot that reports appstate unavailable must not remove the command.
+    const inspectFacts: InspectDeviceRuntimeFacts = vi.fn(
+      async (inspected: DeviceInfo) =>
+        createAdmissionBinding(inspected, {
+          appLogAvailable: false,
+          appStateAvailable: false,
+          networkAvailable: false,
+          providerMode: 'local',
+        }).facts,
+    );
 
     const response = await withTargetDeviceResolutionScope(
       async () => [device],
@@ -428,7 +445,7 @@ test.each([
     expect(response?.ok).toBe(true);
     if (!response?.ok) return;
     expect(response.data?.availableCommands).toContain(PUBLIC_COMMANDS.appState);
-    expect(inspectFacts).toHaveBeenCalledOnce();
+    expect(inspectFacts).toHaveBeenCalledTimes(1);
   },
 );
 
@@ -441,12 +458,6 @@ test('capabilities accepts a stopped Android AVD placeholder for explicit platfo
     booted: false,
   };
   const sessionStore = makeSessionStore('agent-device-capabilities-stopped-avd-');
-  const runtime = createAdmissionRuntime({
-    appLogAvailable: false,
-    networkAvailable: false,
-    appsAvailable: false,
-    providerMode: 'local',
-  });
 
   const response = await withTargetDeviceResolutionScope(
     async (request) => (request.platform === 'android' ? [stoppedAvd] : []),
@@ -462,8 +473,6 @@ test('capabilities accepts a stopped Android AVD placeholder for explicit platfo
         sessionName: 'default',
         logPath: path.join(os.tmpdir(), 'daemon.log'),
         sessionStore,
-        bindDevice: runtime.bindDevice,
-        inspectFacts: runtime.inspectFacts,
         invoke: async () => ({ ok: true, data: {} }),
       }),
   );
@@ -480,7 +489,6 @@ test('capabilities accepts a stopped Android AVD placeholder for explicit platfo
   expect(response.data?.availableCommands).toEqual(
     expect.arrayContaining(['open', 'screenshot', 'snapshot', 'press', 'fill']),
   );
-  expect(response.data?.availableCommands).toContain(PUBLIC_COMMANDS.shutdown);
 });
 
 function createAdmissionRuntime(options: {
@@ -492,14 +500,16 @@ function createAdmissionRuntime(options: {
   providerMode: RuntimeProviderMode;
 }) {
   const uses: Array<{ required: readonly string[]; preferred: readonly string[] }> = [];
+  const inspections: DeviceInfo[] = [];
+  const inspectFacts: InspectDeviceRuntimeFacts = vi.fn(async (device: DeviceInfo) => {
+    inspections.push(device);
+    return createAdmissionBinding(device, options).facts;
+  });
   const bindDevice: BindDeviceRuntime = async (device, use) => {
     uses.push({ required: [...use.required], preferred: [...use.preferred] });
     return narrowDeviceBinding(createAdmissionBinding(device, options), use);
   };
-  const inspectFacts: InspectDeviceRuntimeFacts = vi.fn(
-    async (device) => createAdmissionBinding(device, options).facts,
-  );
-  return { bindDevice, inspectFacts, uses };
+  return { bindDevice, inspectFacts, inspections, uses };
 }
 
 type AdmissionRuntimeOptions = Readonly<{
@@ -517,13 +527,21 @@ function createAdmissionBinding(
 ): DeviceBinding<PlatformRuntimeOperations> {
   const unavailable = unavailableOperationFact(options.providerMode);
   const appsFact = appsOperationFact(options);
+  const lifecycleAvailable = admissionLifecycleAvailable(device, options.providerMode);
   return {
     device,
     owner: createAdmissionOwner(device, options.providerMode),
-    facts: createAdmissionFacts(device, options, unavailable, appsFact),
-    operations: createAdmissionOperations(options),
+    facts: createAdmissionFacts(device, options, unavailable, appsFact, lifecycleAvailable),
+    operations: createAdmissionOperations(options, lifecycleAvailable),
     [Symbol.asyncDispose]: async () => {},
   };
+}
+
+function admissionLifecycleAvailable(
+  device: DeviceInfo,
+  providerMode: RuntimeProviderMode,
+): boolean {
+  return providerMode === 'local' && device.platform === 'android';
 }
 
 function createAdmissionOwner(device: DeviceInfo, providerMode: RuntimeProviderMode) {
@@ -537,6 +555,7 @@ function createAdmissionFacts(
   options: AdmissionRuntimeOptions,
   unavailable: ReturnType<typeof unavailableOperationFact>,
   appsFact: ReturnType<typeof appsOperationFact>,
+  lifecycleAvailable: boolean,
 ) {
   return {
     device: {
@@ -549,15 +568,15 @@ function createAdmissionFacts(
         : { iosPhysicalDeviceBackend: device.iosPhysicalDeviceBackend }),
       providerMode: options.providerMode,
     },
-    operations: createAdmissionOperationFacts(device, options, unavailable, appsFact),
+    operations: createAdmissionOperationFacts(options, unavailable, appsFact, lifecycleAvailable),
   };
 }
 
 function createAdmissionOperationFacts(
-  device: DeviceInfo,
   options: AdmissionRuntimeOptions,
   unavailable: ReturnType<typeof unavailableOperationFact>,
   appsFact: ReturnType<typeof appsOperationFact>,
+  lifecycleAvailable: boolean,
 ) {
   return {
     appLogInspect: options.appLogAvailable ? { available: true as const } : unavailable,
@@ -565,10 +584,6 @@ function createAdmissionOperationFacts(
     appLogStart: unavailable,
     appLogReattach: unavailable,
     appLogCleanup: unavailable,
-    deployApp: unavailable,
-    materializeAppSource: unavailable,
-    deployMaterializedApp: unavailable,
-    sendPushNotification: unavailable,
     appState:
       (options.appStateAvailable ?? options.appLogAvailable)
         ? { available: true as const }
@@ -586,29 +601,42 @@ function createAdmissionOperationFacts(
     bootTarget: unavailable,
     bootTargetHeadless: unavailable,
     listApps: appsFact,
-    shutdownTarget: shutdownFact(device, options.providerMode),
+    ...admissionLifecycleFacts(lifecycleAvailable, unavailable),
   };
 }
 
-function shutdownFact(device: DeviceInfo, providerMode: RuntimeProviderMode) {
-  return providerMode === 'local' && isShutdownDevice(device)
-    ? { available: true as const }
-    : unavailableOperationFact(providerMode);
-}
-
-function isShutdownDevice(device: DeviceInfo): boolean {
-  return (
-    (isIosFamily(device) && device.kind === 'simulator') ||
-    (device.platform === 'android' && device.kind === 'emulator')
-  );
-}
-
-function createAdmissionOperations(options: AdmissionRuntimeOptions) {
+function createAdmissionOperations(options: AdmissionRuntimeOptions, lifecycleAvailable: boolean) {
   return {
     ...(options.appLogAvailable ? { appLogInspect: inspectAndroidAppLog } : {}),
     ...(options.networkAvailable ? { networkDump: dumpEmptyAndroidNetwork } : {}),
+    ...(lifecycleAvailable ? lifecycleOperations : {}),
   };
 }
+
+function admissionLifecycleFacts(lifecycleAvailable: boolean, unavailable: RuntimeOperationFact) {
+  const lifecycleFact = lifecycleAvailable ? ({ available: true } as const) : unavailable;
+  return applicationLifecycleOperationFacts({
+    resolveOpenTarget: lifecycleFact,
+    prepareApplicationOpen: lifecycleFact,
+    openApplication: lifecycleFact,
+    applyRuntimeHints: lifecycleFact,
+    clearRuntimeHints: lifecycleFact,
+    closeApplication: lifecycleFact,
+    finalizeApplicationClose: lifecycleFact,
+    prepareAppleRunner: unavailable,
+    configureProviderPortReverse: unavailable,
+  });
+}
+
+const lifecycleOperations = {
+  resolveOpenTarget: async () => ({}),
+  prepareApplicationOpen: async () => {},
+  openApplication: async () => ({ timing: {} }),
+  applyRuntimeHints: async () => {},
+  clearRuntimeHints: async () => {},
+  closeApplication: async () => {},
+  finalizeApplicationClose: async () => {},
+};
 
 function unavailableOperationFact(providerMode: RuntimeProviderMode) {
   return {

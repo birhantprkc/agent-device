@@ -62,6 +62,11 @@ export { assertCommandPlatformExecution } from '../command-platform-execution.ts
 export type { CommandPlatformExecution } from '../command-platform-execution.ts';
 export { AsyncCleanupStack, PendingTransferGuard } from '../async-lifecycle.ts';
 export {
+  resetStartupRecoveryFencesForTests,
+  runStartupRecoveryFence,
+  waitForStartupRecoveryFence,
+} from '../startup-recovery-fence.ts';
+export {
   localRuntimeOwner,
   narrowDeviceBinding,
   providerRuntimeOwner,
@@ -90,7 +95,6 @@ export type {
 export {
   createUnavailablePlatformRuntimeBinding,
   createUnavailablePlatformRuntimeFacts,
-  createUnavailablePlatformRuntimeOwner,
 } from '../platform-runtime-unavailable.ts';
 export type { UnavailablePlatformRuntimeFacts } from '../platform-runtime-unavailable.ts';
 export type {
@@ -243,6 +247,65 @@ export type {
   DeviceShutdownRuntimeLoaders,
   DeviceShutdownRuntimeOperations,
 } from '../device-shutdown-runtime.ts';
+export type {
+  ApplicationLifecycleResourceLifecycle,
+  ApplicationLifecycleExecution,
+  ApplicationLifecycleProviderInteractorResolver,
+  AndroidApplicationTools,
+  AppleApplicationTools,
+  LocalApplicationInteractorHost,
+  ApplicationLifecycleRuntimeOperations,
+  CloseApplicationFinalizationResult,
+  CloseApplicationFinalizationInput,
+  CloseApplicationInput,
+  OpenApplicationInput,
+  OpenApplicationOutcome,
+  OpenApplicationPreparationInput,
+  OpenApplicationTiming,
+  OpenTargetResolution,
+  OpenTargetResolutionInput,
+  PrepareAppleRunnerInput,
+  PrepareAppleRunnerResult,
+  RuntimeHintsApplicationInput,
+  RuntimeHintValues,
+} from '../application-lifecycle-runtime.ts';
+export {
+  applicationLifecycleOperationFacts,
+  availableApplicationLifecycleOperations,
+  hasRuntimeTransportHintValues,
+} from '../application-lifecycle-runtime.ts';
+export type { ApplicationLifecycleOperationFacts } from '../application-lifecycle-runtime.ts';
+export {
+  bindDirectApplicationLifecycle,
+  bindLocalApplicationLifecycleInteractor,
+  bindProviderApplicationLifecycleInteractor,
+  invokeApplicationClose,
+  invokeApplicationOpen,
+} from '../application-lifecycle-interaction.ts';
+export type {
+  ApplicationLifecycleInteractorBinding,
+  DirectApplicationLifecycleParams,
+  DirectOpenTargetIdentity,
+  LocalApplicationLifecycleInteractorResolver,
+} from '../application-lifecycle-interaction.ts';
+export {
+  clearRuntimeHintsRuntimeUse,
+  closeApplicationRuntimePlanUses,
+  closeApplicationRuntimeUse,
+  closeApplicationWithRuntimeHintClearUse,
+  configureProviderPortReverseRuntimeUse,
+  finalizeApplicationCloseRuntimeUse,
+  finalizeApplicationCloseWithRuntimeHintClearUse,
+  openApplicationRuntimeUse,
+  openApplicationWithRuntimeHintApplyAndClearUse,
+  openApplicationWithRuntimeHintApplyUse,
+  openApplicationRuntimePlanUses,
+  openApplicationWithRuntimeHintClearUse,
+  prepareAppleRunnerRuntimeUse,
+  resolveOpenApplicationRuntimePlan,
+  runtimeCommandRuntimePlanUses,
+} from '../application-lifecycle-runtime-plan.ts';
+export type { OpenApplicationRuntimePlan } from '../application-lifecycle-runtime-plan.ts';
 export {
   appLogAdmissionUse,
   appLogRuntimePlanUses,

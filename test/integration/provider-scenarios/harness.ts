@@ -18,15 +18,16 @@ import type { DaemonRequest, DaemonResponse, SessionState } from '../../../src/d
 import { runCmdBackground } from '../../../src/utils/exec.ts';
 import type {
   DeviceInventoryProvider,
-  ProviderDeviceInventorySource,
   ProviderDeviceRuntime,
+  ProviderDeviceInventorySource,
 } from '@agent-device/contracts/device';
-import type { PlatformRuntimeProviderRegistration } from '../../../src/platform-runtime-gateway.ts';
 import {
   createTestDeviceInventoryGateways,
   createTestDeviceInventoryGatewaysFromProvider,
 } from '../../../src/__tests__/test-utils/device-inventory-gateways.ts';
 import { createPlatformRuntimeGateway } from '../../../src/platform-runtime.ts';
+import type { PlatformRuntimeProviderRegistration } from '../../../src/platform-runtime-gateway.ts';
+import { createProviderPlatformRuntimeRegistrations } from '../../../src/provider-device-runtimes.ts';
 import { unavailableDeviceRuntimeGateway } from '../../../src/daemon/__tests__/test-device-runtime-gateway.ts';
 
 const PROVIDER_SCENARIO_TOKEN = 'provider-scenario-token';
@@ -62,15 +63,25 @@ export type ClosableProviderScenarioResource = {
   close: () => Promise<void> | void;
 };
 
+export type ProviderScenarioPlatformRuntime =
+  | boolean
+  | Readonly<{
+      providerRuntimes: readonly ProviderDeviceRuntime[];
+      providerModules: readonly PlatformRuntimeProviderRegistration[];
+    }>;
+
 export async function createProviderScenarioHarness(
   deps: Partial<Omit<RequestRouterDeps, 'deviceInventoryGateways'>> &
     (
       | { deviceInventoryProvider: DeviceInventoryProvider; deviceInventorySource?: never }
       | { deviceInventorySource: ProviderDeviceInventorySource; deviceInventoryProvider?: never }
     ) & {
-      platformRuntime?: boolean;
+      /**
+       * Eager provider ownership metadata used only to build explicit provider registrations for
+       * a scenario. It is intentionally not forwarded as ambient router policy.
+       */
       providerRuntimes?: readonly ProviderDeviceRuntime[];
-      providerModules?: readonly PlatformRuntimeProviderRegistration[];
+      platformRuntime?: ProviderScenarioPlatformRuntime;
     },
 ): Promise<ProviderScenarioHarness> {
   const sessionDir = fs.mkdtempSync(
@@ -81,17 +92,25 @@ export async function createProviderScenarioHarness(
     deviceInventoryProvider,
     deviceInventorySource,
     deviceRuntimeGateway: configuredDeviceRuntimeGateway,
-    platformRuntime,
+    platformRuntime = true,
     providerRuntimes,
-    providerModules,
     ...routerDeps
   } = deps;
+  const platformRuntimeOptions =
+    typeof platformRuntime === 'object'
+      ? platformRuntime
+      : {
+          // Provider runtime mechanics remain implementation-lazy, but their owner metadata is
+          // present before the first facts admission. This matches daemon composition and makes
+          // a missing provider module fail closed instead of falling back to host tooling.
+          providerRuntimes: providerRuntimes ?? [],
+          providerModules: createProviderPlatformRuntimeRegistrations(providerRuntimes ?? []),
+        };
   const deviceRuntimeGateway =
     configuredDeviceRuntimeGateway ??
-    (platformRuntime || providerRuntimes !== undefined || providerModules !== undefined
+    (platformRuntime
       ? createPlatformRuntimeGateway({
-          providerRuntimes,
-          providerModules,
+          ...platformRuntimeOptions,
           sessionsDir: sessionDir,
           resolveSessionArtifacts: (sessionId) => ({
             outputPath: sessionStore.resolveAppLogPath(sessionId),

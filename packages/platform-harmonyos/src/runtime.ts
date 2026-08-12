@@ -4,18 +4,23 @@ import type {
   PlatformRuntimeOperations,
   PlatformRuntimeOwner,
 } from '@agent-device/contracts/platform';
-import { localRuntimeOwner } from '@agent-device/contracts/platform';
+import {
+  applicationLifecycleOperationFacts,
+  availableApplicationLifecycleOperations,
+  localRuntimeOwner,
+} from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { createHarmonyAppLogRuntime } from './logs/runtime.ts';
 import {
   createHarmonyScreenRecordingOperations,
   harmonyScreenRecordingFacts,
 } from './recording/runtime.ts';
+import { readHarmonyAppState } from './app-state.ts';
+import { bindHarmonyApplicationLifecycle } from './lifecycle.ts';
 import {
   createHarmonyAppDeploymentOperations,
   harmonyAppDeploymentFacts,
 } from './deployment/runtime.ts';
-import { readHarmonyAppState } from './app-state.ts';
 
 const owner = localRuntimeOwner('harmonyos');
 const available = Object.freeze({ available: true } as const);
@@ -28,6 +33,56 @@ const appStateUnavailable = Object.freeze({
   reason: 'unsupported-device-kind',
   hint: 'HarmonyOS appstate is supported only for HarmonyOS emulators and devices.',
 } as const);
+const prepareUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-platform-leaf',
+  hint: 'Apple runner preparation is supported only for Apple targets.',
+} as const);
+
+const lifecycleAvailable = Object.freeze({ available: true } as const);
+const openTargetKindUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'open is supported only for HarmonyOS emulators and devices.',
+} as const);
+const closeTargetKindUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'close is supported only for HarmonyOS emulators and devices.',
+} as const);
+const portReverseUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-provider-mode',
+  hint: 'Port reverse is supported only by an owning provider runtime.',
+} as const);
+
+function harmonyLifecycleFacts(device: DeviceInfo) {
+  const openTarget = harmonyOpenTargetFact(device);
+  const closeTarget = harmonyCloseTargetFact(device);
+  return applicationLifecycleOperationFacts({
+    resolveOpenTarget: openTarget,
+    prepareApplicationOpen: openTarget,
+    openApplication: openTarget,
+    applyRuntimeHints: unavailable,
+    clearRuntimeHints: unavailable,
+    closeApplication: closeTarget,
+    finalizeApplicationClose: closeTarget,
+    prepareAppleRunner: prepareUnavailable,
+    configureProviderPortReverse: portReverseUnavailable,
+  });
+}
+
+function harmonyOpenTargetFact(device: DeviceInfo) {
+  return device.kind === 'emulator' || device.kind === 'device'
+    ? lifecycleAvailable
+    : openTargetKindUnavailable;
+}
+
+function harmonyCloseTargetFact(device: DeviceInfo) {
+  return device.kind === 'emulator' || device.kind === 'device'
+    ? lifecycleAvailable
+    : closeTargetKindUnavailable;
+}
 
 export function createHarmonyPlatformRuntime(host: PlatformRuntimeHost): PlatformRuntimeOwner {
   const appLogs = createHarmonyAppLogRuntime(host);
@@ -49,6 +104,7 @@ export function createHarmonyPlatformRuntime(host: PlatformRuntimeHost): Platfor
         bootTarget: unavailable,
         bootTargetHeadless: unavailable,
         listApps: available,
+        ...harmonyLifecycleFacts(device),
         shutdownTarget: unavailable,
       },
     });
@@ -97,6 +153,14 @@ export function createHarmonyPlatformRuntime(host: PlatformRuntimeHost): Platfor
               input.filter,
               request.scope.signal,
             ),
+          ...availableApplicationLifecycleOperations(
+            bindHarmonyApplicationLifecycle({
+              host: host.localInteractors,
+              device: request.device,
+              signal: request.scope.signal,
+            }),
+            facts.operations,
+          ),
         }),
         [Symbol.asyncDispose]: async () => await logs[Symbol.asyncDispose](),
       }) satisfies DeviceBinding<PlatformRuntimeOperations>;

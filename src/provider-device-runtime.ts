@@ -3,9 +3,10 @@ import type {
   DeviceLease,
   LeaseLifecycleContext,
   LeaseLifecycleProvider,
+  ProviderDeviceInstallOptions,
+  ProviderDeviceInstallResult,
   ProviderDeviceRuntime,
   ProviderExpiredLeaseRecovery,
-  ProviderPortReverseOptions,
 } from '@agent-device/contracts/device';
 import type { Interactor, RunnerContext } from '@agent-device/contracts/interaction';
 import type {
@@ -13,7 +14,7 @@ import type {
   CloudArtifactsQuery,
   CloudArtifactsResult,
 } from '@agent-device/contracts/observability';
-import type { DeviceInfo } from '@agent-device/kernel/device';
+import { publicPlatformString, type DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
@@ -39,6 +40,8 @@ type AppleRunnerScreenRecordingRuntimeExtension = ProviderDeviceRuntime & {
 };
 
 export type ProviderDeviceRuntimeRequestProviders = {
+  /** Eager provider ownership metadata for the platform-runtime composition boundary. */
+  providerRuntimes: readonly ProviderDeviceRuntime[];
   providerRuntimeIds: readonly string[];
   providerRuntimeRequiredIds: readonly string[];
   recoverableProviderIds: readonly string[];
@@ -84,13 +87,37 @@ export function isActiveProviderDevice(device: DeviceInfo): boolean {
   return getActiveProviderDeviceRuntimes().some((runtime) => runtime.ownsDevice(device));
 }
 
-export async function configureProviderPortReverse(
-  options: ProviderPortReverseOptions,
-): Promise<Record<string, unknown> | undefined> {
+export async function installProviderDeviceApp(
+  device: DeviceInfo,
+  app: string,
+  appPath: string,
+  options?: ProviderDeviceInstallOptions,
+): Promise<ProviderDeviceInstallResult | undefined> {
   for (const runtime of getActiveProviderDeviceRuntimes()) {
-    if (!runtimeMatchesProvider(runtime, options.provider)) continue;
-    const result = await runtime.configurePortReverse?.(options);
+    if (!runtime.ownsDevice(device)) continue;
+    if (!runtime.installApp) {
+      throw unsupportedProviderOperation(runtime, device, 'install');
+    }
+    const result = await runtime.installApp?.(device, app, appPath, options);
     if (result) return result;
+    throw unsupportedProviderOperation(runtime, device, 'install');
+  }
+  return undefined;
+}
+
+export async function installProviderDeviceInstallablePath(
+  device: DeviceInfo,
+  installablePath: string,
+  options?: ProviderDeviceInstallOptions,
+): Promise<ProviderDeviceInstallResult | undefined> {
+  for (const runtime of getActiveProviderDeviceRuntimes()) {
+    if (!runtime.ownsDevice(device)) continue;
+    if (!runtime.installInstallablePath) {
+      throw unsupportedProviderOperation(runtime, device, 'install_from_source');
+    }
+    const result = await runtime.installInstallablePath?.(device, installablePath, options);
+    if (result) return result;
+    throw unsupportedProviderOperation(runtime, device, 'install_from_source');
   }
   return undefined;
 }
@@ -106,6 +133,7 @@ export function createProviderDeviceRuntimeRequestProviders(
   assertUniqueProviderRuntimeIds(runtimes);
   const providerRuntimeIds = runtimes.map((runtime) => runtime.provider);
   return {
+    providerRuntimes: Object.freeze([...runtimes]),
     providerRuntimeIds,
     providerRuntimeRequiredIds: uniqueProviderIds([
       ...providerRuntimeIds,
@@ -281,4 +309,16 @@ function runtimeMatchesProvider(
   provider: string | undefined,
 ): boolean {
   return runtime.provider === provider;
+}
+
+function unsupportedProviderOperation(
+  runtime: ProviderDeviceRuntime,
+  device: DeviceInfo,
+  operation: string,
+): never {
+  throw new AppError(
+    'UNSUPPORTED_OPERATION',
+    `Provider device runtime ${runtime.provider} does not support ${operation} for this device.`,
+    { provider: runtime.provider, deviceId: device.id, platform: publicPlatformString(device) },
+  );
 }

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { expect, test, vi } from 'vitest';
 import {
+  applicationLifecycleOperationFacts,
   localRuntimeOwner,
   type DeviceRuntimeGateway,
   type PlatformRuntimeOperations,
@@ -45,10 +46,6 @@ test('recovery cleans a recording through its exact runtime owner', async () => 
         appLogStart: unavailable,
         appLogReattach: unavailable,
         appLogCleanup: unavailable,
-        deployApp: unavailable,
-        materializeAppSource: unavailable,
-        deployMaterializedApp: unavailable,
-        sendPushNotification: unavailable,
         appState: unavailable,
         networkDump: unavailable,
         screenRecordingStart: unavailable,
@@ -58,7 +55,17 @@ test('recovery cleans a recording through its exact runtime owner', async () => 
         bootTarget: unavailable,
         bootTargetHeadless: unavailable,
         listApps: unavailable,
-        shutdownTarget: unavailable,
+        ...applicationLifecycleOperationFacts({
+          resolveOpenTarget: unavailable,
+          prepareApplicationOpen: unavailable,
+          openApplication: unavailable,
+          applyRuntimeHints: unavailable,
+          clearRuntimeHints: unavailable,
+          closeApplication: unavailable,
+          finalizeApplicationClose: unavailable,
+          prepareAppleRunner: unavailable,
+          configureProviderPortReverse: unavailable,
+        }),
       },
     },
     operations: {

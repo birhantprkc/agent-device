@@ -601,7 +601,7 @@ function androidLaunchablePackagesAdbResult(args: string[]): AndroidAdbResult | 
 }
 
 function androidInstalledPackagesAdbResult(key: string): AndroidAdbResult | undefined {
-  if (key === 'shell pm list packages -3' || key === 'shell pm list packages') {
+  if (key === 'shell pm list packages -3') {
     return {
       stdout: 'package:com.example.demo\npackage:com.example.serviceonly\n',
       stderr: '',

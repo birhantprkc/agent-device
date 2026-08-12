@@ -1,4 +1,5 @@
 import type { PlatformRuntimeHost } from '@agent-device/contracts/platform';
+import type { Interactor } from '@agent-device/contracts/interaction';
 import { hostFixture } from './logs/runtime.fixtures.ts';
 
 export function platformRuntimeHostFixture(): PlatformRuntimeHost {
@@ -23,37 +24,37 @@ export function platformRuntimeHostFixture(): PlatformRuntimeHost {
       android: { run: async () => ({ stdout: '' }) },
       harmonyos: { run: async () => ({ stdout: '' }) },
     },
-    appleDeployment: {
-      prepareArtifact: async () => {
-        throw new Error('unused');
-      },
-      install: async () => {
-        throw new Error('unused');
-      },
-      uninstall: async () => {
-        throw new Error('unused');
-      },
-      push: async () => {
-        throw new Error('unused');
-      },
-    },
     deviceReadiness: {
       applePhysical: { ensureConnected: async () => {} },
-      appleAutomation: { keepHot: () => {} },
+      appleAutomation: { keepHot: () => {}, markBooted: () => {} },
       androidEmulator: {
         discover: async () => [],
         launch: () => 1,
         terminate: async () => {},
       },
     },
-    deviceShutdown: {
-      apple: {
-        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
-      },
-      android: {
-        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
-      },
+    localInteractors: { resolve: async () => ({}) as Interactor },
+    applicationResources: {
+      recoverStartupResources: async () => {},
+      detachForDaemonShutdown: async () => {},
+      finalizeDaemonShutdown: async () => {},
     },
+    appleApplications: {
+      resolveOpenTarget: async () => ({}),
+      prewarmRunnerCache: async () => {},
+      prewarmRunnerSession: async () => {},
+      notifyRunnerAppRelaunched: async () => {},
+      stopRunnerSession: async () => {},
+      scheduleRunnerIdleStop: () => {},
+      prepareRunner: async () => ({ runner: {}, connectMs: 0, healthCheckMs: 0 }),
+      applyRuntimeHints: async () => {},
+      clearRuntimeHints: async () => {},
+      dismissCloseAlerts: async () => {},
+      shutdownTarget: async () => undefined,
+      detachRunnerSessionsForShutdown: async () => {},
+      finalizeRunnerSessionsForShutdown: async () => {},
+    },
+    androidApplications: {} as PlatformRuntimeHost['androidApplications'],
     screenRecording: {
       apple: {
         availability: async () => ({ available: true }),

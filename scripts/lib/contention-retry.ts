@@ -54,7 +54,7 @@ const REVIEW_BY = '2026-10-31';
  */
 export const CONTENTION_RETRY_FILES: readonly ContentionRetryEntry[] = [
   {
-    file: 'src/platforms/android/__tests__/app-deployment.test.ts',
+    file: 'src/platforms/android/__tests__/app-lifecycle-install.test.ts',
     reason:
       'Stubs bundletool on PATH (adb is in-process) and spawns zip/unzip for .aab packaging paths.',
     trackingIssue: SUBPROCESS_STUB_ISSUE,

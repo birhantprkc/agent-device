@@ -1,17 +1,106 @@
-import {
-  createUnavailablePlatformRuntimeOwner,
-  type PlatformRuntimeOwner,
+import type {
+  DeviceBinding,
+  PlatformRuntimeHost,
+  PlatformRuntimeOperations,
+  PlatformRuntimeOwner,
+  RuntimeFacts,
+  RuntimeOperationUnavailability,
 } from '@agent-device/contracts/platform';
+import {
+  applicationLifecycleOperationFacts,
+  availableApplicationLifecycleOperations,
+  createUnavailablePlatformRuntimeFacts,
+  localRuntimeOwner,
+  sameRuntimeOwner,
+} from '@agent-device/contracts/platform';
+import type { DeviceInfo } from '@agent-device/kernel/device';
+import { AppError } from '@agent-device/kernel/errors';
+import { bindLinuxApplicationLifecycle } from './lifecycle.ts';
 
-const unavailable = Object.freeze({
-  available: false,
-  reason: 'unsupported-platform-leaf',
-} as const);
-
-export function createLinuxPlatformRuntime(): PlatformRuntimeOwner {
-  return createUnavailablePlatformRuntimeOwner('linux', {
-    appLog: unavailable,
-    network: unavailable,
-    shutdown: unavailable,
+const supported = Object.freeze({ available: true } as const);
+const linuxOwner = localRuntimeOwner('linux');
+const unsupportedPlatformLeaf = unavailableLinuxRuntimeFact('unsupported-platform-leaf');
+const runtimeHintsUnavailable = unavailableLinuxRuntimeFact(
+  'unsupported-platform-leaf',
+  'Runtime hints are supported only for local iOS-family simulators and Android devices.',
+);
+const appleRunnerUnavailable = unavailableLinuxRuntimeFact(
+  'unsupported-platform-leaf',
+  'Apple runner preparation is supported only for Apple targets.',
+);
+const providerPortReverseUnavailable = unavailableLinuxRuntimeFact(
+  'unsupported-provider-mode',
+  'Port reverse is supported only by an owning provider runtime.',
+);
+const openTargetKindUnavailable = unavailableLinuxRuntimeFact(
+  'unsupported-device-kind',
+  'open is supported only for the Linux desktop device.',
+);
+const closeTargetKindUnavailable = unavailableLinuxRuntimeFact(
+  'unsupported-device-kind',
+  'close is supported only for the Linux desktop device.',
+);
+export function createLinuxPlatformRuntime(host: PlatformRuntimeHost): PlatformRuntimeOwner {
+  return Object.freeze({
+    owner: linuxOwner,
+    ownsDevice: (device) => device.platform === 'linux',
+    inspectFacts: async (device) => linuxFacts(device),
+    bind: async (request) => {
+      if (
+        request.intent.kind === 'exact-owner' &&
+        !sameRuntimeOwner(request.intent.owner, linuxOwner)
+      ) {
+        throw new AppError('UNSUPPORTED_OPERATION', 'Linux runtime owner identity does not match');
+      }
+      if (request.device.platform !== 'linux') {
+        throw new AppError('UNSUPPORTED_PLATFORM', 'Linux runtime cannot bind this device');
+      }
+      const facts = linuxFacts(request.device);
+      const lifecycle = bindLinuxApplicationLifecycle({
+        host: host.localInteractors,
+        device: request.device,
+        signal: request.scope.signal,
+      });
+      return Object.freeze({
+        device: request.device,
+        owner: linuxOwner,
+        facts,
+        operations: Object.freeze(
+          availableApplicationLifecycleOperations(lifecycle, facts.operations),
+        ),
+        [Symbol.asyncDispose]: async () => undefined,
+      }) satisfies DeviceBinding<PlatformRuntimeOperations>;
+    },
+    shutdown: async () => undefined,
   });
+}
+
+function linuxFacts(device: DeviceInfo): RuntimeFacts<PlatformRuntimeOperations> {
+  const openTarget = device.kind === 'device' ? supported : openTargetKindUnavailable;
+  const closeTarget = device.kind === 'device' ? supported : closeTargetKindUnavailable;
+  return createUnavailablePlatformRuntimeFacts(device, linuxOwner, {
+    appLog: unsupportedPlatformLeaf,
+    network: unsupportedPlatformLeaf,
+    readiness: unsupportedPlatformLeaf,
+    lifecycle: applicationLifecycleOperationFacts({
+      resolveOpenTarget: openTarget,
+      prepareApplicationOpen: openTarget,
+      openApplication: openTarget,
+      applyRuntimeHints: runtimeHintsUnavailable,
+      clearRuntimeHints: runtimeHintsUnavailable,
+      closeApplication: closeTarget,
+      finalizeApplicationClose: closeTarget,
+      prepareAppleRunner: appleRunnerUnavailable,
+      configureProviderPortReverse: providerPortReverseUnavailable,
+    }),
+  });
+}
+
+function unavailableLinuxRuntimeFact(
+  reason: RuntimeOperationUnavailability['reason'],
+  hint?: string,
+): RuntimeOperationUnavailability {
+  return Object.freeze(
+    hint === undefined ? { available: false, reason } : { available: false, reason, hint },
+  );
 }

@@ -1,5 +1,5 @@
 import Limrun from '@limrun/api';
-import type { Interactor } from '@agent-device/contracts/interaction';
+import type { Interactor, RunnerContext } from '@agent-device/contracts/interaction';
 import type {
   DeviceInventoryProvider,
   DeviceLease,
@@ -43,8 +43,8 @@ import { providerRuntimeOwner } from '@agent-device/contracts/platform';
 import type { LimrunAppLogDescriptor } from './app-log-descriptor.ts';
 import type { LimrunAppLogReader } from './app-log-poller.ts';
 import { buildLimrunClientOptions, LIMRUN_CLIENT_HEADER } from './client-options.ts';
-import type { LimrunRequestOperationDrain } from './request-cancellation.ts';
 import { resolveLimrunRuntimeInstance } from './runtime-instance.ts';
+import type { LimrunRequestOperationDrain } from './request-cancellation.ts';
 
 type LimrunInstance = {
   metadata: { id: string };
@@ -147,11 +147,11 @@ class LimrunRuntimeImplementation implements ProviderDeviceRuntime {
     return parseLimrunDeviceId(device.id) !== undefined;
   }
 
-  isSessionActive(device: DeviceInfo): boolean {
+  hasLiveSession(device: DeviceInfo): boolean {
     return this.getSessionForDevice(device) !== undefined;
   }
 
-  getInteractor(device: DeviceInfo): Interactor | undefined {
+  getInteractor(device: DeviceInfo, _runner?: RunnerContext): Interactor | undefined {
     const session = this.getSessionForDevice(device);
     if (!session) return undefined;
     return session.platform === 'ios'
@@ -405,7 +405,8 @@ async function loadLimrunPlatformRuntime(
     host,
     runtimeInstance,
     ownsDevice: (device) => runtime.ownsDevice(device),
-    isSessionActive: (device) => runtime.isSessionActive(device),
+    hasLiveSession: (device) => runtime.hasLiveSession(device),
+    getInteractor: (device, runner) => runtime.getInteractor(device, runner),
     openCurrent: async (device) => runtime.currentAppLogReader(device),
     reconnect: async (descriptor, signal) =>
       await runtime.reconnectAppLogReader(descriptor, signal),
@@ -459,6 +460,7 @@ async function loadLimrunPlatformRuntime(
         signal,
         operationDrain,
       ),
+    configurePortReverse: async (options) => await runtime.configurePortReverse(options),
   });
 }
 

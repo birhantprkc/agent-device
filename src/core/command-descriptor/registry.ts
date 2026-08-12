@@ -13,7 +13,6 @@ import {
 import { resolvePostActionObservationSupport } from './post-action-observation.ts';
 import type { PostActionObservationSupport } from './post-action-observation.ts';
 import {
-  deployAppUse,
   appLogRuntimePlanUses,
   appsRuntimeUse,
   appStateRuntimeUses,
@@ -21,10 +20,11 @@ import {
   deviceBootRuntimeUses,
   inventoryUse,
   networkDumpUse,
-  readyMaterializeAndDeployAppUse,
-  readySendPushNotificationUse,
+  openApplicationRuntimePlanUses,
+  closeApplicationRuntimePlanUses,
+  prepareAppleRunnerRuntimeUse,
+  runtimeCommandRuntimePlanUses,
   screenRecordingRuntimePlanUses,
-  shutdownTargetUse,
 } from '@agent-device/contracts/platform';
 import { readDeclaredPlatformExecution } from './platform-execution-entry.ts';
 import type {
@@ -217,11 +217,12 @@ const ALL_DEVICE_COMMAND_CAPABILITY = {
   android: ANDROID_ALL,
   linux: LINUX_DEVICE,
 } satisfies CommandCapability;
-const APP_RUNTIME_CAPABILITY = ALL_DEVICE_COMMAND_CAPABILITY;
-const VEGA_APP_RUNTIME_CAPABILITY = {
-  ...APP_RUNTIME_CAPABILITY,
-  vega: VEGA_VVD,
+const APP_INSTALL_CAPABILITY = {
+  apple: APPLE_SIM_AND_DEVICE,
+  android: ANDROID_ALL,
+  linux: LINUX_NONE,
 } satisfies CommandCapability;
+
 // ---------------------------------------------------------------------------
 // ADR 0019 §6 platform-execution modes. Every descriptor declares one; there is
 // no registry-entry default (see `readDeclaredPlatformExecution`).
@@ -514,9 +515,14 @@ export const RAW_COMMAND_DESCRIPTORS = [
     catalog: { group: 'public' },
     recordsSessionAction: false,
     daemon: { route: 'session', refFrameEffect: 'may-invalidate', sessionKind: 'state' },
-    platformExecution: { kind: 'device-runtime', use: shutdownTargetUse },
+    capability: {
+      apple: { simulator: true },
+      android: { emulator: true },
+      linux: LINUX_NONE,
+    },
     timeoutPolicy: DEFAULT_TIMEOUT_POLICY,
     batchable: true,
+    platformExecution: LEGACY_PLATFORM_EXECUTION,
   },
   {
     name: 'appstate',
@@ -635,7 +641,7 @@ export const RAW_COMMAND_DESCRIPTORS = [
     daemon: { route: 'session', refFrameEffect: 'preserve' },
     timeoutPolicy: DEFAULT_TIMEOUT_POLICY,
     batchable: false,
-    platformExecution: LEGACY_PLATFORM_EXECUTION,
+    platformExecution: { kind: 'device-runtime', uses: runtimeCommandRuntimePlanUses },
   },
   {
     name: 'clipboard',
@@ -682,9 +688,10 @@ export const RAW_COMMAND_DESCRIPTORS = [
     recordsSessionAction: true,
     recordingEffect: 'mutates-app',
     daemon: { route: 'session', refFrameEffect: 'may-invalidate' },
-    platformExecution: { kind: 'device-runtime', use: deployAppUse },
+    capability: APP_INSTALL_CAPABILITY,
     timeoutPolicy: INSTALL_TIMEOUT_POLICY,
     batchable: true,
+    platformExecution: LEGACY_PLATFORM_EXECUTION,
   },
   {
     name: 'reinstall',
@@ -693,27 +700,28 @@ export const RAW_COMMAND_DESCRIPTORS = [
     recordsSessionAction: true,
     recordingEffect: 'mutates-app',
     daemon: { route: 'session', refFrameEffect: 'may-invalidate' },
-    platformExecution: { kind: 'device-runtime', use: deployAppUse },
+    capability: APP_INSTALL_CAPABILITY,
     timeoutPolicy: INSTALL_TIMEOUT_POLICY,
     batchable: true,
+    platformExecution: LEGACY_PLATFORM_EXECUTION,
   },
   {
     name: 'install_source',
     ...(ownerFilesEnabled
-      ? { ownerFiles: ['src/daemon/handlers/session-app-source-deployment.ts'] as const }
+      ? { ownerFiles: ['src/daemon/handlers/install-source.ts'] as const }
       : {}),
     catalog: { group: 'internal', key: 'installSource' },
     recordsSessionAction: true,
     recordingEffect: 'mutates-app',
     daemon: { route: 'session', refFrameEffect: 'may-invalidate' },
-    platformExecution: { kind: 'device-runtime', use: readyMaterializeAndDeployAppUse },
     timeoutPolicy: INSTALL_TIMEOUT_POLICY,
     batchable: false,
+    platformExecution: LEGACY_PLATFORM_EXECUTION,
   },
   {
     name: 'release_materialized_paths',
     ...(ownerFilesEnabled
-      ? { ownerFiles: ['src/daemon/handlers/session-app-source-deployment.ts'] as const }
+      ? { ownerFiles: ['src/daemon/handlers/install-source.ts'] as const }
       : {}),
     catalog: { group: 'internal', key: 'releaseMaterializedPaths' },
     recordsSessionAction: false,
@@ -729,9 +737,15 @@ export const RAW_COMMAND_DESCRIPTORS = [
     recordsSessionAction: true,
     recordingEffect: 'mutates-app',
     daemon: { route: 'session', refFrameEffect: 'may-invalidate' },
-    platformExecution: { kind: 'device-runtime', use: readySendPushNotificationUse },
+    dispatch: {},
+    capability: {
+      apple: { simulator: true },
+      android: ANDROID_ALL,
+      linux: LINUX_NONE,
+    },
     timeoutPolicy: DEFAULT_TIMEOUT_POLICY,
     batchable: true,
+    platformExecution: LEGACY_PLATFORM_EXECUTION,
   },
   {
     name: 'trigger-app-event',
@@ -758,11 +772,9 @@ export const RAW_COMMAND_DESCRIPTORS = [
       allowSessionlessDefaultDevice: allowAnyDeviceSessionless,
       saveScriptFlagOwner: true,
     },
-    dispatch: {},
-    capability: VEGA_APP_RUNTIME_CAPABILITY,
     timeoutPolicy: DEFAULT_TIMEOUT_POLICY,
     batchable: true,
-    platformExecution: LEGACY_PLATFORM_EXECUTION,
+    platformExecution: { kind: 'device-runtime', uses: openApplicationRuntimePlanUses },
   },
   {
     name: 'prepare',
@@ -770,9 +782,6 @@ export const RAW_COMMAND_DESCRIPTORS = [
     catalog: { group: 'public' },
     recordsSessionAction: false,
     daemon: { route: 'session', refFrameEffect: 'preserve' },
-    // `ios-runner` has no Android implementation; admission must agree with
-    // the handler rather than advertising a command that always rejects later.
-    capability: { apple: APPLE_SIM_AND_DEVICE, android: {}, linux: LINUX_NONE },
     // Runner warm-up builds are the longest fixed envelope; --timeout overrides.
     timeoutPolicy: {
       budget: { source: 'flag' },
@@ -781,7 +790,7 @@ export const RAW_COMMAND_DESCRIPTORS = [
     },
     batchable: false,
     mcpExposed: false,
-    platformExecution: LEGACY_PLATFORM_EXECUTION,
+    platformExecution: { kind: 'device-runtime', use: prepareAppleRunnerRuntimeUse },
   },
   {
     name: 'batch',
@@ -806,10 +815,9 @@ export const RAW_COMMAND_DESCRIPTORS = [
       saveScriptFlagOwner: true,
     },
     dispatch: {},
-    capability: VEGA_APP_RUNTIME_CAPABILITY,
     timeoutPolicy: DEFAULT_TIMEOUT_POLICY,
     batchable: true,
-    platformExecution: LEGACY_PLATFORM_EXECUTION,
+    platformExecution: { kind: 'device-runtime', uses: closeApplicationRuntimePlanUses },
   },
 
   // -- snapshot (route: snapshot) --
@@ -1270,9 +1278,10 @@ export const RAW_COMMAND_DESCRIPTORS = [
     catalog: { group: 'public', key: 'installFromSource' },
     recordsSessionAction: true,
     recordingEffect: 'mutates-app',
-    platformExecution: { kind: 'device-runtime', use: readyMaterializeAndDeployAppUse },
+    capability: APP_INSTALL_CAPABILITY,
     timeoutPolicy: DEFAULT_TIMEOUT_POLICY,
     batchable: true,
+    platformExecution: LEGACY_PLATFORM_EXECUTION,
   },
 
   // -- local client-backed CLI/MCP commands (no daemon route/capability) --

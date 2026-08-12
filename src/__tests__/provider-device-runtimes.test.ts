@@ -11,10 +11,7 @@ test('default provider runtimes skip Limrun when only the removed API key alias 
     runtimes.some((runtime) => runtime.provider === 'limrun'),
     false,
   );
-  assert.deepEqual(
-    platformModules.map((registration) => registration.runtime),
-    runtimes,
-  );
+  assertPlatformModuleCoverage(runtimes, platformModules);
   await Promise.all(runtimes.map(async (runtime) => await runtime.shutdown()));
 });
 
@@ -29,10 +26,29 @@ test('default provider runtimes load Limrun when a Limrun API key is configured'
   );
   const limrun = runtimes.find((runtime) => runtime.provider === 'limrun');
   assert.equal(limrun ? 'loadRuntime' in limrun : true, false);
-  assert.equal(platformModules.length, runtimes.length);
+  assertPlatformModuleCoverage(runtimes, platformModules, [limrun!]);
   assert.equal(
-    platformModules.find((registration) => registration.runtime === limrun)?.runtime,
-    limrun,
+    platformModules.some(({ runtime }) => runtime === limrun),
+    true,
   );
   await Promise.all(runtimes.map(async (runtime) => await runtime.shutdown()));
 });
+
+function assertPlatformModuleCoverage(
+  runtimes: readonly object[],
+  platformModules: ReadonlyArray<
+    Readonly<{ runtime: object; module: { owner: { provider: string } } }>
+  >,
+  explicitModules: readonly object[] = [],
+): void {
+  const runtimeModules = runtimes.filter(
+    (runtime) => 'owner' in runtime && 'loadRuntime' in runtime,
+  );
+  assert.deepEqual(
+    platformModules.map(({ runtime }) => runtime),
+    [...runtimeModules, ...explicitModules],
+  );
+  for (const { runtime, module } of platformModules) {
+    assert.equal('provider' in runtime ? runtime.provider : undefined, module.owner.provider);
+  }
+}

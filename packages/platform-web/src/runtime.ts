@@ -5,10 +5,16 @@ import type {
   PlatformRuntimeOwner,
   RuntimeFacts,
 } from '@agent-device/contracts/platform';
-import { localRuntimeOwner, sameRuntimeOwner } from '@agent-device/contracts/platform';
+import {
+  applicationLifecycleOperationFacts,
+  availableApplicationLifecycleOperations,
+  localRuntimeOwner,
+  sameRuntimeOwner,
+} from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
 import { bindWebScreenRecordingRuntime } from './recording/runtime.ts';
+import { bindWebApplicationLifecycle } from './lifecycle.ts';
 
 const owner = localRuntimeOwner('web');
 const available = Object.freeze({ available: true } as const);
@@ -30,18 +36,55 @@ const appsUnavailable = Object.freeze({
   reason: 'unsupported-platform-leaf',
   hint: 'apps is not supported on web targets.',
 } as const);
-const deploymentUnavailable = Object.freeze({
-  available: false,
-  reason: 'unsupported-platform-leaf',
-} as const);
 const appStateUnavailable = Object.freeze({
   available: false,
   reason: 'unsupported-platform-leaf',
 } as const);
-const shutdownUnavailable = Object.freeze({
+const prepareUnavailable = Object.freeze({
   available: false,
   reason: 'unsupported-platform-leaf',
+  hint: 'Apple runner preparation is supported only for Apple targets.',
 } as const);
+
+const openTargetKindUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'open is supported only for web browser devices.',
+} as const);
+const closeTargetKindUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'close is supported only for web browser devices.',
+} as const);
+const portReverseUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-provider-mode',
+  hint: 'Port reverse is supported only by an owning provider runtime.',
+} as const);
+
+function webLifecycleFacts(device: DeviceInfo) {
+  const openTarget = webOpenTargetFact(device);
+  const closeTarget = webCloseTargetFact(device);
+  return applicationLifecycleOperationFacts({
+    resolveOpenTarget: openTarget,
+    prepareApplicationOpen: openTarget,
+    openApplication: openTarget,
+    applyRuntimeHints: readinessUnavailable,
+    clearRuntimeHints: readinessUnavailable,
+    closeApplication: closeTarget,
+    finalizeApplicationClose: closeTarget,
+    prepareAppleRunner: prepareUnavailable,
+    configureProviderPortReverse: portReverseUnavailable,
+  });
+}
+
+function webOpenTargetFact(device: DeviceInfo) {
+  return device.kind === 'device' ? available : openTargetKindUnavailable;
+}
+
+function webCloseTargetFact(device: DeviceInfo) {
+  return device.kind === 'device' ? available : closeTargetKindUnavailable;
+}
 
 export function createWebPlatformRuntime(host: PlatformRuntimeHost): PlatformRuntimeOwner {
   const inspectFacts = async (device: DeviceInfo) => {
@@ -76,6 +119,7 @@ export function createWebPlatformRuntime(host: PlatformRuntimeHost): PlatformRun
         signal: request.scope.signal,
       });
       return bindWebRuntime(
+        host,
         request.device,
         request.scope.signal,
         transport,
@@ -88,6 +132,7 @@ export function createWebPlatformRuntime(host: PlatformRuntimeHost): PlatformRun
 }
 
 function bindWebRuntime(
+  host: PlatformRuntimeHost,
   device: DeviceInfo,
   signal: AbortSignal,
   transport: Awaited<ReturnType<PlatformRuntimeHost['networkTransports']['resolve']>>,
@@ -108,6 +153,10 @@ function bindWebRuntime(
         }
       : {}),
     ...recording.operations,
+    ...availableApplicationLifecycleOperations(
+      bindWebApplicationLifecycle({ host: host.localInteractors, device, signal }),
+      facts.operations,
+    ),
   };
   return Object.freeze({
     device,
@@ -141,10 +190,6 @@ function webRuntimeFacts(
       appLogStart: appLogUnavailable,
       appLogReattach: appLogUnavailable,
       appLogCleanup: appLogUnavailable,
-      deployApp: deploymentUnavailable,
-      materializeAppSource: deploymentUnavailable,
-      deployMaterializedApp: deploymentUnavailable,
-      sendPushNotification: deploymentUnavailable,
       appState: appStateUnavailable,
       networkDump: transport.dump ? available : networkUnavailable,
       screenRecordingStart: recordingAvailable ? available : recordingUnavailable,
@@ -154,7 +199,12 @@ function webRuntimeFacts(
       bootTarget: readinessUnavailable,
       bootTargetHeadless: readinessUnavailable,
       listApps: appsUnavailable,
-      shutdownTarget: shutdownUnavailable,
+      deployApp: readinessUnavailable,
+      materializeAppSource: readinessUnavailable,
+      deployMaterializedApp: readinessUnavailable,
+      sendPushNotification: readinessUnavailable,
+      shutdownTarget: readinessUnavailable,
+      ...webLifecycleFacts(device),
     },
   });
 }

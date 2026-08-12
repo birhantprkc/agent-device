@@ -1,3 +1,4 @@
+import { createProviderDeviceRuntimeRequestProviders } from '../../../src/provider-device-runtime.ts';
 import type {
   DeviceInventoryProvider,
   DeviceLease,
@@ -5,29 +6,33 @@ import type {
   ProviderDeviceRuntime,
   ProviderPortReverseOptions,
 } from '@agent-device/contracts/device';
-import type { Interactor, SnapshotResult } from '@agent-device/contracts/interaction';
+import type {
+  Interactor,
+  RunnerContext,
+  SnapshotResult,
+} from '@agent-device/contracts/interaction';
 import {
+  applicationLifecycleOperationFacts,
+  availableApplicationLifecycleOperations,
+  bindProviderApplicationLifecycleInteractor,
+  invokeApplicationClose,
+  invokeApplicationOpen,
   providerRuntimeOwner,
-  createUnavailablePlatformRuntimeFacts,
   sameRuntimeOwner,
-  type AppDeploymentInput,
-  type AppDeploymentResult,
+  type ApplicationLifecycleRuntimeOperations,
   type DeviceBinding,
+  type DeviceBindingRequest,
   type PlatformRuntimeOperations,
   type PlatformRuntimeOwner,
   type PlatformRuntimeProviderModule,
+  type RuntimeFacts,
 } from '@agent-device/contracts/platform';
-import type { DeviceInfo } from '@agent-device/kernel/device';
+import type { DaemonRequest } from '../../../src/daemon/types.ts';
+import { deviceShape, type DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
-import { createProviderDeviceRuntimeRequestProviders } from '../../../src/provider-device-runtime.ts';
 import { createProviderScenarioHarness } from './harness.ts';
 
 export const FAKE_PROVIDER = 'fake-provider';
-export const DEVTOOLS_PORT_REVERSE = {
-  devicePort: 8097,
-  hostPort: 8097,
-  portReverseName: 'devtools',
-};
 
 const ABSENT_FAKE_PROVIDER_INTERACTOR_PROPERTIES = new Set([
   'then',
@@ -59,12 +64,15 @@ type FakeProviderSession = {
 export async function createFakeProviderWorld(platform: 'android' | 'ios' = 'android') {
   const runtime = new FakeProviderDeviceRuntime(platform);
   const providerRuntimeProviders = createProviderDeviceRuntimeRequestProviders([runtime]);
+  const owner = providerRuntimeOwner(FAKE_PROVIDER, platform);
+  const providerModule = createProviderScenarioLifecycleModule(runtime, owner);
   const daemon = await createProviderScenarioHarness({
     ...providerRuntimeProviders,
     deviceInventorySource: providerRuntimeProviders.deviceInventorySource!,
-    platformRuntime: true,
-    providerRuntimes: [runtime],
-    providerModules: [Object.freeze({ runtime, module: runtime.platformRuntimeModule })],
+    platformRuntime: {
+      providerRuntimes: [runtime],
+      providerModules: [{ runtime, module: providerModule }],
+    },
   });
   return {
     daemon,
@@ -76,16 +84,170 @@ export async function createFakeProviderWorld(platform: 'android' | 'ios' = 'and
   };
 }
 
+const fakeProviderAvailable = Object.freeze({ available: true } as const);
+const fakeProviderUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-provider-mode',
+} as const);
+
+/**
+ * Test-only explicit provider module. Scenarios opt into it at construction time so their
+ * lifecycle open/close traffic crosses the same owner-selected gateway as production; the
+ * harness never manufactures this module from ambient request state.
+ */
+export function createProviderScenarioLifecycleModule(
+  runtime: ProviderDeviceRuntime,
+  owner: ReturnType<typeof providerRuntimeOwner>,
+): PlatformRuntimeProviderModule {
+  return Object.freeze({
+    owner,
+    loadRuntime: async () => createProviderScenarioLifecycleOwner(runtime, owner),
+  });
+}
+
+function createProviderScenarioLifecycleOwner(
+  runtime: ProviderDeviceRuntime,
+  owner: ReturnType<typeof providerRuntimeOwner>,
+): PlatformRuntimeOwner {
+  return Object.freeze({
+    owner,
+    ownsDevice: (device) => runtime.ownsDevice(device),
+    inspectFacts: async (device) => providerScenarioRuntimeFacts(device, runtime),
+    bind: async (request) => bindProviderScenarioPlatformRuntime(runtime, owner, request),
+    shutdown: async () => undefined,
+  });
+}
+
+async function bindProviderScenarioPlatformRuntime(
+  runtime: ProviderDeviceRuntime,
+  owner: ReturnType<typeof providerRuntimeOwner>,
+  request: DeviceBindingRequest,
+): Promise<DeviceBinding<PlatformRuntimeOperations>> {
+  if (!runtime.ownsDevice(request.device)) {
+    throw new AppError('UNSUPPORTED_PLATFORM', 'Fake provider runtime does not own this device');
+  }
+  if (request.intent.kind === 'exact-owner' && !sameRuntimeOwner(request.intent.owner, owner)) {
+    throw new AppError(
+      'UNSUPPORTED_OPERATION',
+      'Fake provider runtime owner identity does not match',
+    );
+  }
+  const facts = providerScenarioRuntimeFacts(request.device, runtime);
+  return Object.freeze({
+    device: request.device,
+    owner,
+    facts,
+    operations: availableApplicationLifecycleOperations(
+      providerScenarioApplicationLifecycle(runtime, request.device, request.scope.signal),
+      facts.operations,
+    ),
+    [Symbol.asyncDispose]: async () => undefined,
+  });
+}
+
+function providerScenarioApplicationLifecycle(
+  runtime: ProviderDeviceRuntime,
+  device: DeviceInfo,
+  signal: AbortSignal,
+): ApplicationLifecycleRuntimeOperations {
+  const binding = bindProviderApplicationLifecycleInteractor({
+    device,
+    signal,
+    resolveInteractor: (runner) => runtime.getInteractor(device, runner),
+  });
+  return Object.freeze({
+    resolveOpenTarget: async (input) => ({
+      ...(input.target?.includes('.') ? { appBundleId: input.target } : {}),
+      ...(input.target === undefined ? {} : { appName: input.target }),
+    }),
+    prepareApplicationOpen: async () => undefined,
+    openApplication: async (input) => {
+      if (input.relaunch && input.target) {
+        await invokeApplicationClose({
+          device,
+          interactor: await binding.resolveInteractor(input.execution, input.appBundleId),
+          positionals: [input.appBundleId ?? input.target],
+        });
+      }
+      await invokeApplicationOpen({
+        device,
+        interactor: await binding.resolveInteractor(input.execution, input.appBundleId),
+        positionals: input.positionals,
+        appBundleId: input.appBundleId,
+        execution: input.execution,
+      });
+      return { appBundleId: input.appBundleId, timing: {} };
+    },
+    applyRuntimeHints: async () => undefined,
+    clearRuntimeHints: async () => undefined,
+    closeApplication: async (input) => {
+      await invokeApplicationClose({
+        device,
+        interactor: await binding.resolveInteractor(input.execution, input.appBundleId),
+        positionals: input.positionals,
+      });
+    },
+    finalizeApplicationClose: async () => ({}),
+    prepareAppleRunner: async () => {
+      throw new AppError('UNSUPPORTED_OPERATION', 'Fake provider does not prepare Apple runners.');
+    },
+    configureProviderPortReverse: runtime.configurePortReverse
+      ? async (input) => await runtime.configurePortReverse?.(input)
+      : unavailableProviderScenarioOperation,
+  });
+}
+
+function providerScenarioRuntimeFacts(
+  device: DeviceInfo,
+  runtime: ProviderDeviceRuntime,
+): RuntimeFacts<PlatformRuntimeOperations> {
+  return Object.freeze({
+    device: { ...deviceShape(device), providerMode: 'provider-runtime' },
+    operations: {
+      appLogInspect: fakeProviderUnavailable,
+      appLogDoctor: fakeProviderUnavailable,
+      appLogStart: fakeProviderUnavailable,
+      appLogReattach: fakeProviderUnavailable,
+      appLogCleanup: fakeProviderUnavailable,
+      appState: fakeProviderUnavailable,
+      networkDump: fakeProviderUnavailable,
+      screenRecordingStart: fakeProviderUnavailable,
+      screenRecordingReattach: fakeProviderUnavailable,
+      screenRecordingCleanup: fakeProviderUnavailable,
+      ensureReady: fakeProviderUnavailable,
+      bootTarget: fakeProviderUnavailable,
+      bootTargetHeadless: fakeProviderUnavailable,
+      listApps: fakeProviderUnavailable,
+      ...applicationLifecycleOperationFacts({
+        resolveOpenTarget: fakeProviderAvailable,
+        prepareApplicationOpen: fakeProviderAvailable,
+        openApplication: fakeProviderAvailable,
+        applyRuntimeHints: fakeProviderUnavailable,
+        clearRuntimeHints: fakeProviderUnavailable,
+        closeApplication: fakeProviderAvailable,
+        finalizeApplicationClose: fakeProviderAvailable,
+        prepareAppleRunner: fakeProviderUnavailable,
+        configureProviderPortReverse:
+          device.platform === 'android' && runtime.configurePortReverse
+            ? fakeProviderAvailable
+            : fakeProviderUnavailable,
+      }),
+    },
+  });
+}
+
+async function unavailableProviderScenarioOperation(): Promise<never> {
+  throw new AppError('UNSUPPORTED_OPERATION', 'This provider scenario operation is unavailable.');
+}
+
 export class FakeProviderDeviceRuntime implements ProviderDeviceRuntime {
   readonly provider = FAKE_PROVIDER;
   readonly calls: FakeProviderCall[] = [];
-  readonly platformRuntimeModule: PlatformRuntimeProviderModule;
   private readonly sessionsByLeaseId = new Map<string, FakeProviderSession>();
   private readonly platform: 'android' | 'ios';
 
   constructor(platform: 'android' | 'ios' = 'android') {
     this.platform = platform;
-    this.platformRuntimeModule = createFakeProviderPlatformRuntimeModule(this);
   }
 
   readonly leaseLifecycle: LeaseLifecycleProvider = {
@@ -141,7 +303,7 @@ export class FakeProviderDeviceRuntime implements ProviderDeviceRuntime {
     return device.id.startsWith(`fake-provider:${this.platform}:`);
   }
 
-  getInteractor(device: DeviceInfo): Interactor | undefined {
+  getInteractor(device: DeviceInfo, _runner?: RunnerContext): Interactor | undefined {
     return [...this.sessionsByLeaseId.values()].find((session) => session.device.id === device.id)
       ?.interactor;
   }
@@ -199,82 +361,6 @@ export class FakeProviderDeviceRuntime implements ProviderDeviceRuntime {
   }
 }
 
-const fakeProviderRuntimeOwner = providerRuntimeOwner(FAKE_PROVIDER, 'default');
-const available = Object.freeze({ available: true } as const);
-const unavailable = Object.freeze({
-  available: false,
-  reason: 'unsupported-provider-mode',
-} as const);
-
-function createFakeProviderPlatformRuntimeModule(
-  runtime: FakeProviderDeviceRuntime,
-): PlatformRuntimeProviderModule {
-  return Object.freeze({
-    owner: fakeProviderRuntimeOwner,
-    loadRuntime: async () => createFakeProviderPlatformRuntimeOwner(runtime),
-  });
-}
-
-function createFakeProviderPlatformRuntimeOwner(
-  runtime: FakeProviderDeviceRuntime,
-): PlatformRuntimeOwner {
-  const factsFor = (device: DeviceInfo) => {
-    const unavailableFacts = createUnavailablePlatformRuntimeFacts(
-      device,
-      fakeProviderRuntimeOwner,
-      {
-        appLog: unavailable,
-        appDeployment: unavailable,
-        network: unavailable,
-        readiness: unavailable,
-      },
-    );
-    const ownsDevice = runtime.ownsDevice(device);
-    return Object.freeze({
-      ...unavailableFacts,
-      operations: Object.freeze({
-        ...unavailableFacts.operations,
-        deployApp: ownsDevice ? available : unavailable,
-        ensureReady: ownsDevice ? available : unavailable,
-      }),
-    });
-  };
-  return Object.freeze({
-    owner: fakeProviderRuntimeOwner,
-    ownsDevice: (device) => runtime.ownsDevice(device),
-    inspectFacts: async (device) => factsFor(device),
-    bind: async (request) => {
-      if (
-        request.intent.kind === 'exact-owner' &&
-        !sameRuntimeOwner(request.intent.owner, fakeProviderRuntimeOwner)
-      ) {
-        throw new AppError('UNSUPPORTED_OPERATION', 'Fake provider runtime owner does not match');
-      }
-      if (!runtime.ownsDevice(request.device)) {
-        throw new AppError(
-          'UNSUPPORTED_PLATFORM',
-          'Fake provider runtime does not own this device',
-        );
-      }
-      return Object.freeze({
-        device: request.device,
-        owner: fakeProviderRuntimeOwner,
-        facts: factsFor(request.device),
-        operations: Object.freeze({
-          ensureReady: async () => ({ ...request.device, booted: true }),
-          deployApp: async (input: AppDeploymentInput): Promise<AppDeploymentResult> => {
-            const result = await runtime.installApp(request.device, input.app, input.appPath);
-            if (result) return result;
-            throw new AppError('UNSUPPORTED_OPERATION', 'Fake provider install is unavailable');
-          },
-        }),
-        [Symbol.asyncDispose]: async () => undefined,
-      }) satisfies DeviceBinding<PlatformRuntimeOperations>;
-    },
-    shutdown: async () => undefined,
-  });
-}
-
 function createFakeProviderInteractor(device: DeviceInfo, calls: FakeProviderCall[]): Interactor {
   return new Proxy<Partial<Interactor>>(
     {
@@ -325,6 +411,36 @@ function createFakeProviderInteractor(device: DeviceInfo, calls: FakeProviderCal
       },
     },
   ) as Interactor;
+}
+
+export function leaseFlags(leaseId?: string): DaemonRequest['flags'] {
+  return {
+    platform: 'android',
+    tenant: 'team-a',
+    runId: 'run-a',
+    leaseId,
+    leaseProvider: FAKE_PROVIDER,
+  };
+}
+
+export function leaseMeta(leaseId?: string): DaemonRequest['meta'] {
+  return {
+    tenantId: 'team-a',
+    runId: 'run-a',
+    leaseId,
+    leaseBackend: 'android-instance',
+    leaseProvider: FAKE_PROVIDER,
+    deviceKey: 'android-a',
+    clientId: 'client-a',
+  };
+}
+
+export function iosLeaseFlags(leaseId?: string): DaemonRequest['flags'] {
+  return { ...leaseFlags(leaseId), platform: 'ios' };
+}
+
+export function iosLeaseMeta(leaseId?: string): DaemonRequest['meta'] {
+  return { ...leaseMeta(leaseId), leaseBackend: 'ios-instance', deviceKey: 'ios-a' };
 }
 
 function throwUnexpectedProviderInteraction(method: string): never {

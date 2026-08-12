@@ -6,17 +6,22 @@ import type {
   PlatformRuntimeOwner,
   EnsureReadyInput,
 } from '@agent-device/contracts/platform';
-import { localRuntimeOwner } from '@agent-device/contracts/platform';
+import {
+  applicationLifecycleOperationFacts,
+  availableApplicationLifecycleOperations,
+  localRuntimeOwner,
+} from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { createAndroidAppLogRuntime } from './logs/runtime.ts';
 import { dumpAndroidNetworkTraffic } from './network/runtime.ts';
 import { bindAndroidScreenRecordingRuntime } from './recording/runtime.ts';
+import { ensureAndroidReady } from './readiness/runtime.ts';
+import { readAndroidAppState } from './app-state.ts';
+import { bindAndroidApplicationLifecycle } from './lifecycle.ts';
 import {
   androidAppDeploymentFacts,
   createAndroidAppDeploymentOperations,
 } from './deployment/runtime.ts';
-import { ensureAndroidReady } from './readiness/runtime.ts';
-import { readAndroidAppState } from './app-state.ts';
 
 const owner = localRuntimeOwner('android');
 const available = Object.freeze({ available: true } as const);
@@ -30,11 +35,69 @@ const appStateUnavailable = Object.freeze({
   reason: 'unsupported-device-kind',
   hint: 'Android appstate is supported only for Android emulators and devices.',
 } as const);
+const prepareUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-platform-leaf',
+  hint: 'Apple runner preparation is supported only for Apple targets.',
+} as const);
+const openTargetUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'open is supported only for Android emulators and devices.',
+} as const);
+const closeTargetUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'close is supported only for Android emulators and devices.',
+} as const);
+const runtimeHintsUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-device-kind',
+  hint: 'Runtime hints are supported only for Android emulators and devices.',
+} as const);
+const portReverseUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-provider-mode',
+  hint: 'Port reverse is supported only by an owning provider runtime.',
+} as const);
 const shutdownKindUnavailable = Object.freeze({
   available: false,
   reason: 'unsupported-device-kind',
   hint: 'shutdown is supported only for Apple simulators and Android emulators.',
 } as const);
+
+function androidLifecycleFacts(device: DeviceInfo) {
+  const openTarget = androidOpenTargetFact(device);
+  const closeTarget = androidCloseTargetFact(device);
+  const runtimeHints = androidRuntimeHintsFact(device);
+  return applicationLifecycleOperationFacts({
+    resolveOpenTarget: openTarget,
+    prepareApplicationOpen: openTarget,
+    openApplication: openTarget,
+    applyRuntimeHints: runtimeHints,
+    clearRuntimeHints: runtimeHints,
+    closeApplication: closeTarget,
+    finalizeApplicationClose: closeTarget,
+    prepareAppleRunner: prepareUnavailable,
+    configureProviderPortReverse: portReverseUnavailable,
+  });
+}
+
+function androidOpenTargetFact(device: DeviceInfo) {
+  return device.kind === 'emulator' || device.kind === 'device' ? available : openTargetUnavailable;
+}
+
+function androidCloseTargetFact(device: DeviceInfo) {
+  return device.kind === 'emulator' || device.kind === 'device'
+    ? available
+    : closeTargetUnavailable;
+}
+
+function androidRuntimeHintsFact(device: DeviceInfo) {
+  return device.kind === 'emulator' || device.kind === 'device'
+    ? available
+    : runtimeHintsUnavailable;
+}
 
 export function createAndroidPlatformRuntime(host: PlatformRuntimeHost): PlatformRuntimeOwner {
   const appLogs = createAndroidAppLogRuntime(host);
@@ -55,6 +118,7 @@ export function createAndroidPlatformRuntime(host: PlatformRuntimeHost): Platfor
         bootTarget: available,
         bootTargetHeadless: device.kind === 'emulator' ? available : headlessUnavailable,
         listApps: available,
+        ...androidLifecycleFacts(device),
         shutdownTarget: device.kind === 'emulator' ? available : shutdownKindUnavailable,
       },
     });
@@ -127,6 +191,14 @@ export function createAndroidPlatformRuntime(host: PlatformRuntimeHost): Platfor
               input.filter,
               request.scope.signal,
             ),
+          ...availableApplicationLifecycleOperations(
+            bindAndroidApplicationLifecycle({
+              host,
+              device: request.device,
+              signal: request.scope.signal,
+            }),
+            facts.operations,
+          ),
           ...(facts.operations.shutdownTarget.available
             ? {
                 shutdownTarget: async () =>

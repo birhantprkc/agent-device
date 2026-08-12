@@ -1,4 +1,6 @@
 import {
+  applicationLifecycleOperationFacts,
+  availableApplicationLifecycleOperations,
   createUnavailablePlatformRuntimeFacts,
   sameRuntimeOwner,
   type AppDeploymentInput,
@@ -12,10 +14,12 @@ import {
   type RuntimeFacts,
   type RuntimeOwnerRef,
 } from '@agent-device/contracts/platform';
+import type { Interactor, RunnerContext } from '@agent-device/contracts/interaction';
 import { readRecentNetworkTrafficFromText } from '@agent-device/capture-kit';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
 import type { WebDriverDeploymentRuntime } from './runtime-deployment.ts';
+import { bindWebDriverApplicationLifecycle } from './lifecycle.ts';
 
 type WebDriverPlatformDeploymentRuntime = Pick<
   WebDriverDeploymentRuntime,
@@ -63,6 +67,53 @@ const appStateUnavailable = Object.freeze({
   reason: 'unsupported-provider-mode',
   hint: 'WebDriver provider runtimes do not expose a foreground app-state operation.',
 } as const);
+const prepareUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-provider-mode',
+  hint: 'Apple runner preparation is unavailable for WebDriver-owned devices.',
+} as const);
+const openTargetUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-provider-mode',
+  hint: 'WebDriver open is supported only for its owned iOS or Android mobile-device sessions.',
+} as const);
+const closeTargetUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-provider-mode',
+  hint: 'WebDriver close is supported only for its owned iOS or Android mobile-device sessions.',
+} as const);
+const runtimeHintsUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-provider-mode',
+  hint: 'Runtime hints are not applied to provider-owned devices.',
+} as const);
+const portReverseUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-provider-mode',
+  hint: 'WebDriver provider runtimes do not expose port reverse.',
+} as const);
+
+function webDriverLifecycleFacts(device: DeviceInfo) {
+  const selectedMobileDevice =
+    (device.platform === 'android' && device.kind === 'device' && device.target === 'mobile') ||
+    (device.platform === 'apple' &&
+      device.kind === 'device' &&
+      device.target === 'mobile' &&
+      device.appleOs === 'ios');
+  const target = selectedMobileDevice ? available : openTargetUnavailable;
+  const close = selectedMobileDevice ? available : closeTargetUnavailable;
+  return applicationLifecycleOperationFacts({
+    resolveOpenTarget: target,
+    prepareApplicationOpen: target,
+    openApplication: target,
+    applyRuntimeHints: runtimeHintsUnavailable,
+    clearRuntimeHints: runtimeHintsUnavailable,
+    closeApplication: close,
+    finalizeApplicationClose: close,
+    prepareAppleRunner: prepareUnavailable,
+    configureProviderPortReverse: portReverseUnavailable,
+  });
+}
 export function createWebDriverPlatformRuntimeOwner(
   options: Readonly<{
     host: PlatformRuntimeHost;
@@ -70,6 +121,7 @@ export function createWebDriverPlatformRuntimeOwner(
     ownsDevice(device: DeviceInfo): boolean;
     isSessionActive?(device: DeviceInfo): boolean;
     deployment?: WebDriverPlatformDeploymentRuntime;
+    getInteractor?(device: DeviceInfo, runner?: RunnerContext): Interactor | undefined;
   }>,
 ): PlatformRuntimeOwner {
   return Object.freeze({
@@ -108,6 +160,7 @@ function bindWebDriverPlatformRuntime(
     ownsDevice(device: DeviceInfo): boolean;
     isSessionActive?(device: DeviceInfo): boolean;
     deployment?: WebDriverPlatformDeploymentRuntime;
+    getInteractor?(device: DeviceInfo, runner?: RunnerContext): Interactor | undefined;
   }>,
   device: DeviceInfo,
   signal: AbortSignal,
@@ -118,6 +171,15 @@ function bindWebDriverPlatformRuntime(
   const operations: DeviceBinding<PlatformRuntimeOperations>['operations'] = Object.freeze({
     ensureReady: async () => ({ ...device, booted: true }),
     bootTarget: async () => ({ ...device, booted: true }),
+    ...availableApplicationLifecycleOperations(
+      bindWebDriverApplicationLifecycle({
+        device,
+        signal,
+        getInteractor: (selectedDevice, runner) =>
+          options.getInteractor?.(selectedDevice, runner),
+      }),
+      facts.operations,
+    ),
     networkDump: async (input) => {
       const recent = await options.host.appLogs.readRecent(input.sessionId, input.maxScanLines);
       const dump = readRecentNetworkTrafficFromText(recent.text, {
@@ -173,6 +235,17 @@ function webDriverFacts(
       appDeployment: inactiveSession,
       network: inactiveSession,
       screenRecording: inactiveSession,
+      lifecycle: applicationLifecycleOperationFacts({
+        resolveOpenTarget: inactiveSession,
+        prepareApplicationOpen: inactiveSession,
+        openApplication: inactiveSession,
+        applyRuntimeHints: inactiveSession,
+        clearRuntimeHints: inactiveSession,
+        closeApplication: inactiveSession,
+        finalizeApplicationClose: inactiveSession,
+        prepareAppleRunner: inactiveSession,
+        configureProviderPortReverse: inactiveSession,
+      }),
     });
     return Object.freeze({
       device: unavailable.device,
@@ -196,6 +269,17 @@ function webDriverFacts(
         bootTargetHeadless: inactiveSession,
         listApps: inactiveSession,
         shutdownTarget: inactiveSession,
+        ...applicationLifecycleOperationFacts({
+          resolveOpenTarget: inactiveSession,
+          prepareApplicationOpen: inactiveSession,
+          openApplication: inactiveSession,
+          applyRuntimeHints: inactiveSession,
+          clearRuntimeHints: inactiveSession,
+          closeApplication: inactiveSession,
+          finalizeApplicationClose: inactiveSession,
+          prepareAppleRunner: inactiveSession,
+          configureProviderPortReverse: inactiveSession,
+        }),
       },
     });
   }
@@ -205,6 +289,7 @@ function webDriverFacts(
     appDeployment: deploymentUnavailable,
     network: appLogUnavailable,
     screenRecording: recordingUnavailable,
+    lifecycle: webDriverLifecycleFacts(device),
   });
   return Object.freeze({
     device: unavailable.device,
@@ -232,6 +317,7 @@ function webDriverFacts(
         reason: 'unsupported-provider-mode',
         hint: 'WebDriver owns the target lifecycle for provider-owned devices.',
       },
+      ...webDriverLifecycleFacts(device),
     },
   });
 }

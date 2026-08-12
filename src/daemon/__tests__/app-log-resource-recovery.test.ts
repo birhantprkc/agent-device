@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test, vi } from 'vitest';
 import {
+  applicationLifecycleOperationFacts,
   localRuntimeOwner,
   type CleanupOutcome,
   type DeviceBinding,
@@ -345,10 +346,6 @@ function makeGateway(
           appLogStart: { available: true as const },
           appLogReattach: { available: true as const },
           appLogCleanup: { available: true as const },
-          deployApp: unavailableRecording,
-          materializeAppSource: unavailableRecording,
-          deployMaterializedApp: unavailableRecording,
-          sendPushNotification: unavailableRecording,
           appState: { available: false as const, reason: 'owner-capability-missing' as const },
           networkDump: { available: true as const },
           screenRecordingStart: unavailableRecording,
@@ -358,7 +355,17 @@ function makeGateway(
           bootTarget: { available: true as const },
           bootTargetHeadless: unavailableRecording,
           listApps: unavailableRecording,
-          shutdownTarget: unavailableRecording,
+          ...applicationLifecycleOperationFacts({
+            resolveOpenTarget: unavailableRecording,
+            prepareApplicationOpen: unavailableRecording,
+            openApplication: unavailableRecording,
+            applyRuntimeHints: unavailableRecording,
+            clearRuntimeHints: unavailableRecording,
+            closeApplication: unavailableRecording,
+            finalizeApplicationClose: unavailableRecording,
+            prepareAppleRunner: unavailableRecording,
+            configureProviderPortReverse: unavailableRecording,
+          }),
         },
       },
       operations,

@@ -7,25 +7,21 @@ import {
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { expect, test, vi } from 'vitest';
 import { createLimrunAppLogEnvelope } from './app-log-descriptor.ts';
-import { createLimrunPlatformRuntimeOwner } from './app-log-runtime.ts';
 import {
-  limrunIosDevice as device,
-  limrunRuntimeScope as scope,
-  unusedLimrunRuntimeHost as unusedHost,
-} from './runtime.fixtures.ts';
+  limrunIosSimulator as device,
+  limrunOwnerOptions,
+  limrunScope as scope,
+  unusedLimrunHost as unusedHost,
+} from './app-log-runtime.fixtures.ts';
+import { createLimrunPlatformRuntimeOwner } from './app-log-runtime.ts';
 
 test('rejects a cross-platform durable descriptor before provider reconnection', async () => {
   const reconnect = vi.fn(async () => ({ status: 'missing' as const }));
-  const owner = createLimrunPlatformRuntimeOwner({
-    host: unusedHost(),
-    runtimeInstance: 'default',
-    ownsDevice: () => true,
-    isSessionActive: () => true,
-    openCurrent: async () => undefined,
-    reconnect,
-    listApps: async () => [],
-    getAppState: async () => ({ package: 'com.example.app', activity: '.MainActivity' }),
-  });
+  const owner = createLimrunPlatformRuntimeOwner(
+    limrunOwnerOptions({
+      reconnect,
+    }),
+  );
   const binding = await owner.bind({
     device,
     intent: { kind: 'ordinary' },
@@ -60,16 +56,12 @@ test('rejects a cross-platform durable descriptor before provider reconnection',
 test('rejects cross-session paths before reconnecting or opening a provider reader', async () => {
   const reconnect = vi.fn(async () => ({ status: 'missing' as const }));
   const openCurrent = vi.fn(async () => undefined);
-  const owner = createLimrunPlatformRuntimeOwner({
-    host: unusedHost(),
-    runtimeInstance: 'default',
-    ownsDevice: () => true,
-    isSessionActive: () => true,
-    openCurrent,
-    reconnect,
-    listApps: async () => [],
-    getAppState: async () => ({ package: 'com.example.app', activity: '.MainActivity' }),
-  });
+  const owner = createLimrunPlatformRuntimeOwner(
+    limrunOwnerOptions({
+      openCurrent,
+      reconnect,
+    }),
+  );
   const binding = await owner.bind({ device, intent: { kind: 'ordinary' }, scope });
   const envelope = createLimrunAppLogEnvelope({
     sessionId: 'one',
@@ -105,16 +97,13 @@ test('rejects cross-session paths before reconnecting or opening a provider read
 test('keeps exact-owner app-log recovery available without a process-local session', async () => {
   const openCurrent = vi.fn(async () => undefined);
   const reconnect = vi.fn(async () => ({ status: 'missing' as const }));
-  const owner = createLimrunPlatformRuntimeOwner({
-    host: unusedHost(),
-    runtimeInstance: 'default',
-    ownsDevice: () => true,
-    isSessionActive: () => false,
-    openCurrent,
-    reconnect,
-    listApps: async () => [],
-    getAppState: async () => ({ package: 'com.example.app', activity: '.MainActivity' }),
-  });
+  const owner = createLimrunPlatformRuntimeOwner(
+    limrunOwnerOptions({
+      hasLiveSession: () => false,
+      openCurrent,
+      reconnect,
+    }),
+  );
   const binding = await owner.bind({
     device,
     intent: {
@@ -145,21 +134,21 @@ test('keeps exact-owner app-log recovery available without a process-local sessi
   expect(binding.operations.listApps).toBeUndefined();
   expect(binding.facts.operations.appLogInspect).toMatchObject({
     available: false,
-    reason: 'owner-capability-missing',
+    reason: 'unsupported-provider-mode',
   });
   expect(binding.facts.operations.appLogReattach).toEqual({ available: true });
   expect(binding.facts.operations.appLogCleanup).toEqual({ available: true });
   expect(binding.facts.operations.appState).toMatchObject({
     available: false,
-    reason: 'owner-capability-missing',
+    reason: 'unsupported-provider-mode',
   });
   expect(binding.facts.operations.ensureReady).toMatchObject({
     available: false,
-    reason: 'owner-capability-missing',
+    reason: 'unsupported-provider-mode',
   });
   expect(binding.facts.operations.listApps).toMatchObject({
     available: false,
-    reason: 'owner-capability-missing',
+    reason: 'unsupported-provider-mode',
   });
   expect(() => narrowDeviceBinding(binding, appStateUse)).toThrow();
   expect(() => narrowDeviceBinding(binding, bootTargetUse)).toThrow();
@@ -195,16 +184,11 @@ test.each([
   },
 ])('rejects exact binding for an impossible Limrun $name', async ({ device: invalidDevice }) => {
   const reconnect = vi.fn(async () => ({ status: 'missing' as const }));
-  const owner = createLimrunPlatformRuntimeOwner({
-    host: unusedHost(),
-    runtimeInstance: 'default',
-    ownsDevice: () => true,
-    isSessionActive: () => true,
-    openCurrent: async () => undefined,
-    reconnect,
-    listApps: async () => [],
-    getAppState: async () => ({ package: 'com.example.app', activity: '.MainActivity' }),
-  });
+  const owner = createLimrunPlatformRuntimeOwner(
+    limrunOwnerOptions({
+      reconnect,
+    }),
+  );
 
   await expect(
     owner.bind({
@@ -223,28 +207,23 @@ test.each([
 test('serves provider-owned network from the canonical session app log without local recovery', async () => {
   const commandRun = vi.fn(async () => ({ stdout: '', stderr: '', exitCode: 0 }));
   const base = unusedHost();
-  const owner = createLimrunPlatformRuntimeOwner({
-    host: {
-      ...base,
-      commands: { ...base.commands, run: commandRun },
-      appLogs: {
-        ...base.appLogs,
-        readRecent: async () => ({
-          path: '/sessions/session/app.log',
-          exists: true,
-          text: '2026-08-10T10:00:00Z GET https://limrun.example.test status=200\n',
-          skippedLines: 0,
-        }),
+  const owner = createLimrunPlatformRuntimeOwner(
+    limrunOwnerOptions({
+      host: {
+        ...base,
+        commands: { ...base.commands, run: commandRun },
+        appLogs: {
+          ...base.appLogs,
+          readRecent: async () => ({
+            path: '/sessions/session/app.log',
+            exists: true,
+            text: '2026-08-10T10:00:00Z GET https://limrun.example.test status=200\n',
+            skippedLines: 0,
+          }),
+        },
       },
-    },
-    runtimeInstance: 'default',
-    ownsDevice: () => true,
-    isSessionActive: () => true,
-    openCurrent: async () => undefined,
-    reconnect: async () => ({ status: 'missing' }),
-    listApps: async () => [],
-    getAppState: async () => ({ package: 'com.example.app', activity: '.MainActivity' }),
-  });
+    }),
+  );
   const binding = await owner.bind({ device, intent: { kind: 'ordinary' }, scope });
   await expect(
     binding.operations.networkDump?.({
@@ -262,37 +241,6 @@ test('serves provider-owned network from the canonical session app log without l
   expect(commandRun).not.toHaveBeenCalled();
 });
 
-test('keeps fenced app-log recovery bindable after live Limrun deployment admission closes', async () => {
-  const owner = createLimrunPlatformRuntimeOwner({
-    host: unusedHost(),
-    runtimeInstance: 'default',
-    ownsDevice: () => true,
-    isSessionActive: () => false,
-    openCurrent: async () => undefined,
-    reconnect: async () => ({ status: 'missing' }),
-    listApps: async () => [],
-    getAppState: async () => ({}),
-  });
-
-  const binding = await owner.bind({
-    device,
-    intent: {
-      kind: 'exact-owner',
-      owner: owner.owner,
-      fence: { token: 'fence', generation: 1 },
-    },
-    scope,
-  });
-
-  expect(binding.facts.operations.ensureReady).toMatchObject({
-    available: false,
-    reason: 'owner-capability-missing',
-  });
-  expect(binding.facts.operations.appLogStart).toMatchObject({ available: false });
-  expect(binding.facts.operations.appLogReattach).toEqual({ available: true });
-  expect(binding.operations.appLogReattach).toBeTypeOf('function');
-});
-
 test.each([
   ['iOS simulator', device],
   [
@@ -307,16 +255,11 @@ test.each([
     },
   ],
 ])('classifies the direct Limrun %s runtime denominator', async (_name, runtimeDevice) => {
-  const owner = createLimrunPlatformRuntimeOwner({
-    host: unusedHost(),
-    runtimeInstance: 'default',
-    ownsDevice: () => true,
-    isSessionActive: () => true,
-    openCurrent: async () => undefined,
-    reconnect: async () => ({ status: 'missing' }),
-    listApps: async () => [],
-    getAppState: async () => ({ package: 'com.example.app', activity: '.MainActivity' }),
-  });
+  const owner = createLimrunPlatformRuntimeOwner(
+    limrunOwnerOptions({
+      getInteractor: () => ({}) as never,
+    }),
+  );
   const binding = await owner.bind({ device: runtimeDevice, intent: { kind: 'ordinary' }, scope });
   expect(binding.facts.device.providerMode).toBe('provider-runtime');
   expect(binding.facts.operations.appState.available).toBe(runtimeDevice.platform === 'android');
@@ -328,18 +271,6 @@ test.each([
   await expect(
     binding.operations.listApps?.({ device: runtimeDevice, filter: 'all' }),
   ).resolves.toEqual([]);
-  expect(binding.facts.operations.shutdownTarget).toMatchObject({
-    available: false,
-    reason: 'unsupported-provider-mode',
-  });
-  for (const operation of [
-    'deployApp',
-    'materializeAppSource',
-    'deployMaterializedApp',
-    'sendPushNotification',
-  ] as const) {
-    expect(binding.facts.operations[operation]).toMatchObject({ available: false });
-  }
   await expect(binding.operations.ensureReady?.({})).resolves.toMatchObject({
     id: runtimeDevice.id,
     booted: true,
@@ -371,25 +302,21 @@ test('fails closed for a stale Android identity before exposing facts or binding
     target: 'mobile',
     booted: true,
   };
-  const owner = createLimrunPlatformRuntimeOwner({
-    host: unusedHost(),
-    runtimeInstance: 'default',
-    ownsDevice: () => true,
-    isSessionActive: () => false,
-    openCurrent: async () => undefined,
-    reconnect: async () => ({ status: 'missing' }),
-    listApps: async () => [],
-    getAppState,
-  });
+  const owner = createLimrunPlatformRuntimeOwner(
+    limrunOwnerOptions({
+      hasLiveSession: () => false,
+      getAppState,
+    }),
+  );
 
   const facts = await owner.inspectFacts(staleDevice);
   expect(facts.operations.ensureReady).toMatchObject({
     available: false,
-    reason: 'owner-capability-missing',
+    reason: 'unsupported-provider-mode',
   });
   expect(facts.operations.appState).toMatchObject({
     available: false,
-    reason: 'owner-capability-missing',
+    reason: 'unsupported-provider-mode',
   });
   await expect(
     owner.bind({ device: staleDevice, intent: { kind: 'ordinary' }, scope }),

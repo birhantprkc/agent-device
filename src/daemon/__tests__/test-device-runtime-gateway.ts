@@ -1,6 +1,9 @@
 import {
+  applicationLifecycleOperationFacts,
+  availableApplicationLifecycleOperations,
   localRuntimeOwner,
   narrowDeviceBinding,
+  type ApplicationLifecycleOperationFacts,
   type DeviceRuntimeGateway,
   type PlatformRuntimeOperations,
 } from '@agent-device/contracts/platform';
@@ -10,6 +13,77 @@ import {
 } from '../request-router.ts';
 import type { BindDeviceRuntime, BindExactDeviceRuntime } from '../request-runtime-binding.ts';
 import type { DeviceInfo } from '@agent-device/kernel/device';
+import { applicationLifecycleRuntimeFixture } from './application-lifecycle-runtime-fixture.ts';
+
+const unavailable = Object.freeze({
+  available: false as const,
+  reason: 'owner-capability-missing' as const,
+});
+const available = Object.freeze({ available: true as const });
+
+function lifecycleFactsForTest(device: DeviceInfo): ApplicationLifecycleOperationFacts {
+  return applicationLifecycleOperationFacts({
+    resolveOpenTarget: available,
+    prepareApplicationOpen: available,
+    openApplication: available,
+    applyRuntimeHints: available,
+    clearRuntimeHints: available,
+    closeApplication: available,
+    finalizeApplicationClose: available,
+    prepareAppleRunner: device.platform === 'apple' ? available : unavailable,
+    configureProviderPortReverse: unavailable,
+  });
+}
+
+async function lifecycleBindingForTest(device: DeviceInfo) {
+  const lifecycleFacts = lifecycleFactsForTest(device);
+  return {
+    device,
+    owner: localRuntimeOwner(device.platform),
+    facts: {
+      device: {
+        family: device.platform,
+        kind: device.kind,
+        providerMode: 'local' as const,
+        ...(device.appleOs === undefined ? {} : { appleOs: device.appleOs }),
+        ...(device.target === undefined ? {} : { target: device.target }),
+        ...(device.iosPhysicalDeviceBackend === undefined
+          ? {}
+          : { iosPhysicalDeviceBackend: device.iosPhysicalDeviceBackend }),
+      },
+      operations: {
+        appLogInspect: unavailable,
+        appLogDoctor: unavailable,
+        appLogStart: unavailable,
+        appLogReattach: unavailable,
+        appLogCleanup: unavailable,
+        appState: unavailable,
+        networkDump: unavailable,
+        screenRecordingStart: unavailable,
+        screenRecordingReattach: unavailable,
+        screenRecordingCleanup: unavailable,
+        ensureReady: unavailable,
+        bootTarget: unavailable,
+        bootTargetHeadless: unavailable,
+        listApps: unavailable,
+        ...lifecycleFacts,
+      },
+    },
+    operations: availableApplicationLifecycleOperations(
+      await applicationLifecycleRuntimeFixture(device),
+      lifecycleFacts,
+    ),
+    [Symbol.asyncDispose]: async () => {},
+  };
+}
+
+/** Opt-in lifecycle fixture: commands bind the real root host after fact admission. */
+export const lifecycleDeviceRuntimeGateway: DeviceRuntimeGateway<PlatformRuntimeOperations> =
+  Object.freeze({
+    inspectFacts: async (device) => (await lifecycleBindingForTest(device)).facts,
+    bind: async ({ device }) => await lifecycleBindingForTest(device),
+    shutdown: async () => {},
+  });
 
 export const unavailableDeviceRuntimeGateway: DeviceRuntimeGateway<PlatformRuntimeOperations> =
   Object.freeze({
@@ -34,10 +108,6 @@ export const unavailableDeviceRuntimeGateway: DeviceRuntimeGateway<PlatformRunti
           appLogStart: unavailable,
           appLogReattach: unavailable,
           appLogCleanup: unavailable,
-          deployApp: unavailable,
-          materializeAppSource: unavailable,
-          deployMaterializedApp: unavailable,
-          sendPushNotification: unavailable,
           appState: unavailable,
           networkDump: unavailable,
           screenRecordingStart: unavailable,
@@ -47,7 +117,17 @@ export const unavailableDeviceRuntimeGateway: DeviceRuntimeGateway<PlatformRunti
           bootTarget: unavailable,
           bootTargetHeadless: unavailable,
           listApps: unavailable,
-          shutdownTarget: unavailable,
+          ...applicationLifecycleOperationFacts({
+            resolveOpenTarget: unavailable,
+            prepareApplicationOpen: unavailable,
+            openApplication: unavailable,
+            applyRuntimeHints: unavailable,
+            clearRuntimeHints: unavailable,
+            closeApplication: unavailable,
+            finalizeApplicationClose: unavailable,
+            prepareAppleRunner: unavailable,
+            configureProviderPortReverse: unavailable,
+          }),
         },
       },
       operations: {},
@@ -67,11 +147,6 @@ async function unavailableBinding(device: DeviceInfo) {
     },
   });
 }
-
-const unavailable = Object.freeze({
-  available: false as const,
-  reason: 'owner-capability-missing' as const,
-});
 
 export const unavailableBindDevice: BindDeviceRuntime = async (device, use) =>
   narrowDeviceBinding(await unavailableBinding(device), use);

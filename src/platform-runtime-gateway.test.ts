@@ -1,14 +1,20 @@
 import type { ProviderDeviceRuntime } from '@agent-device/contracts/device';
 import type { Interactor } from '@agent-device/contracts/interaction';
 import type {
+  ApplicationLifecycleRuntimeOperations,
   DeviceBinding,
   PlatformRuntimeHost,
   PlatformRuntimeOperations,
   PlatformRuntimeOwner,
   PlatformRequestScope,
+  RuntimeFacts,
   RuntimeOwnerRef,
 } from '@agent-device/contracts/platform';
-import { providerRuntimeOwner } from '@agent-device/contracts/platform';
+import {
+  applicationLifecycleOperationFacts,
+  availableApplicationLifecycleOperations,
+  providerRuntimeOwner,
+} from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { createLimrunRuntime, type LimrunRuntimeDependencies } from '@agent-device/provider-limrun';
 import { describe, expect, test, vi } from 'vitest';
@@ -36,7 +42,53 @@ const scope: PlatformRequestScope = {
   progress: { report: () => {} },
 };
 
+const LIFECYCLE_FACETS = [
+  ['openTarget', ['resolveOpenTarget', 'prepareApplicationOpen', 'openApplication']],
+  ['prepareAppleRunner', ['prepareAppleRunner']],
+  ['closeTarget', ['closeApplication', 'finalizeApplicationClose']],
+  ['runtimeHints', ['applyRuntimeHints', 'clearRuntimeHints']],
+] as const;
+
+type LifecycleFacet = (typeof LIFECYCLE_FACETS)[number][0];
+
 describe('composed platform runtime gateway', () => {
+  // Which resources need recovering is the host's composition (see
+  // platform-runtime-application-resources.test.ts). The gateway owns only the lazy host load and
+  // the once-per-process shape of each durable phase.
+  test('durable lifecycle phases load the host lazily and run once per process', async () => {
+    const recoverStartupResources = vi.fn(async () => {});
+    const detachForDaemonShutdown = vi.fn(async () => {});
+    const finalizeDaemonShutdown = vi.fn(async () => {});
+    const host = {
+      applicationResources: {
+        recoverStartupResources,
+        detachForDaemonShutdown,
+        finalizeDaemonShutdown,
+      },
+    } as unknown as PlatformRuntimeHost;
+    const loadHost = vi.fn(async () => host);
+    const runtimeGateway = createComposedPlatformRuntimeGateway({
+      modules: new Map(),
+      loadHost,
+    });
+    const lifecycle = runtimeGateway.applicationLifecycle;
+    if (!lifecycle) throw new Error('expected the composed lifecycle gateway');
+    const stateDir = `/tmp/platform-runtime-marker-evidence-${Date.now()}`;
+
+    await lifecycle.recoverStartupResources({ stateDir });
+
+    expect(loadHost).toHaveBeenCalledOnce();
+    expect(recoverStartupResources).toHaveBeenCalledExactlyOnceWith({ stateDir });
+
+    await lifecycle.detachForDaemonShutdown();
+    await lifecycle.detachForDaemonShutdown();
+    await lifecycle.finalizeDaemonShutdown();
+    await lifecycle.finalizeDaemonShutdown();
+
+    expect(detachForDaemonShutdown).toHaveBeenCalledOnce();
+    expect(finalizeDaemonShutdown).toHaveBeenCalledOnce();
+  });
+
   test('inspects only the selected lazy owner and does not bind it', async () => {
     const selectedRef = providerRuntimeOwner('limrun', 'selected');
     const selectedOwner = runtimeOwner({ ref: selectedRef });
@@ -129,7 +181,7 @@ describe('composed platform runtime gateway', () => {
       expect(response?.ok).toBe(false);
       if (response && !response.ok) {
         expect(response.error.code).toBe('UNSUPPORTED_OPERATION');
-        expect(response.error.hint).toMatch(/session is no longer active/i);
+        expect(response.error.hint).toMatch(/matching live provider session/i);
       }
       expect(inspectCount).toBe(1);
       expect(bindCount).toBe(0);
@@ -240,6 +292,40 @@ describe('composed platform runtime gateway', () => {
     expect(hostLoad).not.toHaveBeenCalled();
     expect(localLoad).not.toHaveBeenCalled();
   });
+
+  test.each(LIFECYCLE_FACETS)(
+    'keeps provider-owned unsupported $0 operations closed without loading a local runtime',
+    async (facet, operations) => {
+      const ref = providerRuntimeOwner('webdriver', `unsupported-${facet}`);
+      const owner = providerLifecycleOwner(ref, facet);
+      const localLoad = vi.fn(async () => {
+        throw new Error('local lifecycle fallback must not load');
+      });
+      const registration = providerRuntime({
+        ref,
+        provider: 'webdriver',
+        ownsDevice: () => true,
+        load: async () => owner,
+      });
+      const runtimeGateway = createComposedPlatformRuntimeGateway({
+        modules: new Map([['apple', { family: 'apple', loadRuntime: localLoad }]]),
+        loadHost: async () => ({}) as PlatformRuntimeHost,
+        providerRuntimes: [registration.runtime],
+        providerModules: [registration],
+      });
+
+      const facts = await runtimeGateway.inspectFacts(device);
+      for (const operation of operations) {
+        expect(facts.operations[operation].available).toBe(false);
+      }
+      const binding = await runtimeGateway.bind({ device, intent: { kind: 'ordinary' }, scope });
+      expect(binding.owner).toEqual(ref);
+      for (const operation of operations) {
+        expect(binding.operations[operation]).toBeUndefined();
+      }
+      expect(localLoad).not.toHaveBeenCalled();
+    },
+  );
 
   test('rejects a swapped local module before loading host mechanics', async () => {
     const hostLoad = vi.fn(async () => ({}) as PlatformRuntimeHost);
@@ -391,10 +477,6 @@ function unavailableFacts() {
     appLogStart: unavailable,
     appLogReattach: unavailable,
     appLogCleanup: unavailable,
-    deployApp: unavailable,
-    materializeAppSource: unavailable,
-    deployMaterializedApp: unavailable,
-    sendPushNotification: unavailable,
     appState: unavailable,
     networkDump: unavailable,
     screenRecordingStart: unavailable,
@@ -404,7 +486,80 @@ function unavailableFacts() {
     bootTarget: unavailable,
     bootTargetHeadless: unavailable,
     listApps: unavailable,
-    shutdownTarget: unavailable,
+    ...applicationLifecycleOperationFacts({
+      resolveOpenTarget: unavailable,
+      prepareApplicationOpen: unavailable,
+      openApplication: unavailable,
+      applyRuntimeHints: unavailable,
+      clearRuntimeHints: unavailable,
+      closeApplication: unavailable,
+      finalizeApplicationClose: unavailable,
+      prepareAppleRunner: unavailable,
+      configureProviderPortReverse: unavailable,
+    }),
+  };
+}
+
+function providerLifecycleOwner(
+  ref: Extract<RuntimeOwnerRef, { kind: 'provider-runtime' }>,
+  unavailableFacet: LifecycleFacet,
+): PlatformRuntimeOwner {
+  const unavailable = Object.freeze({
+    available: false,
+    reason: 'unsupported-provider-mode',
+  } as const);
+  const available = Object.freeze({ available: true } as const);
+  const lifecycleFacts = applicationLifecycleOperationFacts({
+    resolveOpenTarget: unavailableFacet === 'openTarget' ? unavailable : available,
+    prepareApplicationOpen: unavailableFacet === 'openTarget' ? unavailable : available,
+    openApplication: unavailableFacet === 'openTarget' ? unavailable : available,
+    applyRuntimeHints: unavailableFacet === 'runtimeHints' ? unavailable : available,
+    clearRuntimeHints: unavailableFacet === 'runtimeHints' ? unavailable : available,
+    closeApplication: unavailableFacet === 'closeTarget' ? unavailable : available,
+    finalizeApplicationClose: unavailableFacet === 'closeTarget' ? unavailable : available,
+    prepareAppleRunner: unavailableFacet === 'prepareAppleRunner' ? unavailable : available,
+    configureProviderPortReverse: unavailable,
+  });
+  const facts: RuntimeFacts<PlatformRuntimeOperations> = {
+    device: {
+      family: device.platform,
+      appleOs: device.appleOs,
+      kind: device.kind,
+      target: device.target,
+      providerMode: 'provider-runtime',
+    },
+    operations: { ...unavailableFacts(), ...lifecycleFacts },
+  };
+  const operations = availableApplicationLifecycleOperations(
+    lifecycleOperations(),
+    facts.operations,
+  );
+  return {
+    owner: ref,
+    ownsDevice: () => true,
+    inspectFacts: async () => facts,
+    bind: async () => ({
+      device,
+      owner: ref,
+      facts,
+      operations: operations as PlatformRuntimeOperations,
+      [Symbol.asyncDispose]: async () => {},
+    }),
+    shutdown: async () => {},
+  };
+}
+
+function lifecycleOperations(): ApplicationLifecycleRuntimeOperations {
+  return {
+    resolveOpenTarget: async () => ({}),
+    prepareApplicationOpen: async () => {},
+    openApplication: async () => ({ timing: {} }),
+    applyRuntimeHints: async () => {},
+    clearRuntimeHints: async () => {},
+    closeApplication: async () => {},
+    finalizeApplicationClose: async () => {},
+    prepareAppleRunner: async () => ({ runner: {}, connectMs: 0, healthCheckMs: 0 }),
+    configureProviderPortReverse: async () => undefined,
   };
 }
 

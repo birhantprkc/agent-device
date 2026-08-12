@@ -3,10 +3,6 @@ import { AppError, normalizeError } from '@agent-device/kernel/errors';
 import type { LeaseLifecycleProvider, TargetShutdownResult } from '@agent-device/contracts/device';
 import type { DaemonRequest, DaemonResponse, SessionState } from '../types.ts';
 import { SessionStore } from '../session-store.ts';
-import { clearRuntimeHintsFromApp, hasRuntimeTransportHints } from '../runtime-hints.ts';
-import { cleanupRetainedMaterializedPathsForSession } from '../materialized-path-registry.ts';
-import { canShutdownSessionTarget, shutdownSessionTarget } from '../session-close-shutdown.ts';
-import type { LeaseLifecycleProvider, TargetShutdownResult } from '@agent-device/contracts/device';
 import { successText, withSuccessText } from '../../utils/success-text.ts';
 import { resolveCommandDevice } from './session-device-utils.ts';
 import { errorResponse } from './response.ts';
@@ -21,7 +17,6 @@ import {
 import { isAuthoringArmedSession } from '../session-script-publication-capability.ts';
 import { type SessionCleanupFailure } from '../session-teardown.ts';
 import { clearDeviceClaim } from '../device-claims.ts';
-import type { DeviceShutdownCloseCapability } from '@agent-device/contracts/platform';
 import { applicationLifecycleExecutionFromRequest } from '../application-lifecycle-execution.ts';
 import { hasRuntimeTransportHints } from './session-runtime.ts';
 import type { BindDeviceRuntime, InspectDeviceRuntimeFacts } from '../request-runtime-binding.ts';
@@ -30,33 +25,6 @@ import {
   commitRepairScriptBeforeClose,
   finalizeOrdinaryCloseScript,
 } from './session-close-script.ts';
-
-async function maybeShutdownSessionTarget(params: {
-  device: DeviceInfo;
-  shutdownRequested: boolean | undefined;
-  getCloseShutdown?: () => Promise<DeviceShutdownCloseCapability>;
-}): Promise<TargetShutdownResult | undefined> {
-  const { device, shutdownRequested, getCloseShutdown } = params;
-  if (!shutdownRequested) return undefined;
-  if (isActiveProviderDevice(device)) return undefined;
-  const capability = getCloseShutdown ? await getCloseShutdown() : undefined;
-  if (!(await canShutdownSessionTarget(capability, device)) || !capability) return undefined;
-  return await shutdownSessionTarget(capability, device);
-}
-
-function shouldRetainAppleRunnerAfterClose(req: DaemonRequest, session: SessionState): boolean {
-  return (
-    isIosSimulator(session.device) &&
-    !req.flags?.shutdown &&
-    !session.screenRecording &&
-    !session.lease &&
-    !session.device.simulatorSetPath
-  );
-}
-
-function shouldStopAppleRunnerBeforeTargetedClose(session: SessionState): boolean {
-  return isApplePlatform(session.device.platform) && !isIosSimulator(session.device);
-}
 import {
   admitCloseRuntime,
   type CloseRuntime,
@@ -211,19 +179,10 @@ export async function handleCloseCommand(params: {
   sessionStore: SessionStore;
   leaseRegistry: LeaseRegistry;
   leaseLifecycleProvider?: LeaseLifecycleProvider;
-  getCloseShutdown?: () => Promise<DeviceShutdownCloseCapability>;
   inspectFacts?: InspectDeviceRuntimeFacts;
   bindDevice?: BindDeviceRuntime;
 }): Promise<DaemonResponse> {
-  const {
-    req,
-    sessionName,
-    logPath,
-    sessionStore,
-    leaseRegistry,
-    leaseLifecycleProvider,
-    getCloseShutdown,
-  } = params;
+  const { req, sessionName, logPath, sessionStore, leaseRegistry, leaseLifecycleProvider } = params;
   const session = sessionStore.get(sessionName);
   if (!session) {
     return await closeWithoutSession({
@@ -279,11 +238,6 @@ export async function handleCloseCommand(params: {
     repairArmed: repair.repairArmed,
   });
   if (closed.kind === 'response') return closed.response;
-  const shutdownResult = await maybeShutdownSessionTarget({
-    device: session.device,
-    shutdownRequested: req.flags?.shutdown,
-    getCloseShutdown,
-  });
   return buildCloseSuccessResponse({
     session,
     repair,
