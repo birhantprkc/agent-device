@@ -51,6 +51,27 @@ test('a shutdown error is successful when final simulator state is Shutdown', as
   );
 });
 
+test('cancellation during the final simulator-state probe is not swallowed', async () => {
+  const device = appleDevice();
+  const controller = new AbortController();
+  run
+    .mockResolvedValueOnce({
+      stdout: '',
+      stderr: 'shutdown failed',
+      exitCode: 149,
+    })
+    .mockImplementationOnce(async () => {
+      controller.abort();
+      throw controller.signal.reason;
+    });
+  const runtime = createAppleShutdownRuntime({ appleTools });
+
+  await expect(runtime.shutdownTarget(device, controller.signal)).rejects.toMatchObject({
+    name: 'AbortError',
+  });
+  expect(run).toHaveBeenCalledTimes(2);
+});
+
 test('watchOS and non-simulator Apple targets are unavailable', () => {
   expect(canShutdownTarget(appleDevice())).toBe(true);
   expect(canShutdownTarget(appleDevice({ appleOs: 'watchos' }))).toBe(false);

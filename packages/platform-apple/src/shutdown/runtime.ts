@@ -72,6 +72,7 @@ async function finalSimulatorState(
   try {
     return await getSimulatorState(appleTools, device, signal, SHUTDOWN_TIMEOUT_MS);
   } catch {
+    signal.throwIfAborted();
     return null;
   }
 }
