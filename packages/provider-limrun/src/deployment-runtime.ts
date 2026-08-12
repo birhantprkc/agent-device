@@ -103,7 +103,7 @@ function limrunDeploymentFact(
 }
 
 /** Admission liveness is synchronous metadata from the provider runtime, never a bind-time probe. */
-export function isActiveLimrunRuntimeSession(
+function isActiveLimrunRuntimeSession(
   options: Pick<LimrunAppDeploymentRuntimeOptions, 'ownsDevice' | 'isSessionActive'>,
   device: DeviceInfo,
 ): boolean {

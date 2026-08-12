@@ -1,6 +1,7 @@
 import type { PlatformRuntimeHost } from '@agent-device/contracts/platform';
 import { isMacOs, type DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
+import { getSimulatorState, simctlArgs } from '../simulator-state.ts';
 
 /** Readiness reads exactly these host ports; the lifecycle binding composes the same subset. */
 export type AppleReadinessHost = Pick<
@@ -104,32 +105,7 @@ async function simulatorState(
   device: DeviceInfo,
   signal: AbortSignal,
 ): Promise<string | null> {
-  const result = await host.appleTools.run(
-    {
-      tool: 'simctl',
-      args: simctlArgs(device, ['list', 'devices', '-j']),
-      allowFailure: true,
-      timeoutMs: LIST_TIMEOUT_MS,
-    },
-    signal,
-  );
-  if (result.exitCode !== 0) return null;
-  try {
-    const payload = JSON.parse(result.stdout) as {
-      devices: Record<string, Array<{ udid: string; state: string }>>;
-    };
-    return (
-      Object.values(payload.devices)
-        .flat()
-        .find(({ udid }) => udid === device.id)?.state ?? null
-    );
-  } catch {
-    return null;
-  }
-}
-
-function simctlArgs(device: DeviceInfo, args: readonly string[]): string[] {
-  return device.simulatorSetPath ? ['--set', device.simulatorSetPath, ...args] : [...args];
+  return await getSimulatorState(host.appleTools, device, signal, LIST_TIMEOUT_MS);
 }
 
 async function showSimulator(host: AppleReadinessHost, signal: AbortSignal): Promise<void> {

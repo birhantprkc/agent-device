@@ -105,23 +105,6 @@ export async function installProviderDeviceApp(
   return undefined;
 }
 
-export async function installProviderDeviceInstallablePath(
-  device: DeviceInfo,
-  installablePath: string,
-  options?: ProviderDeviceInstallOptions,
-): Promise<ProviderDeviceInstallResult | undefined> {
-  for (const runtime of getActiveProviderDeviceRuntimes()) {
-    if (!runtime.ownsDevice(device)) continue;
-    if (!runtime.installInstallablePath) {
-      throw unsupportedProviderOperation(runtime, device, 'install_from_source');
-    }
-    const result = await runtime.installInstallablePath?.(device, installablePath, options);
-    if (result) return result;
-    throw unsupportedProviderOperation(runtime, device, 'install_from_source');
-  }
-  return undefined;
-}
-
 function getActiveProviderDeviceRuntimes(): ProviderDeviceRuntime[] {
   return providerDeviceRuntimeScope.getStore() ?? activeProviderDeviceRuntimes;
 }

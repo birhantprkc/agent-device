@@ -11,8 +11,12 @@ const sessionCloseSource = readFileSync(
   new URL('../../../daemon/handlers/session-close.ts', import.meta.url),
   'utf8',
 );
-const closeAdapterSource = readFileSync(
-  new URL('../../../daemon/session-close-shutdown.ts', import.meta.url),
+const appleLifecycleSource = readFileSync(
+  new URL('../../../../packages/platform-apple/src/lifecycle.ts', import.meta.url),
+  'utf8',
+);
+const androidLifecycleSource = readFileSync(
+  new URL('../../../../packages/platform-android/src/lifecycle.ts', import.meta.url),
   'utf8',
 );
 const sharedHostSource = readFileSync(
@@ -48,10 +52,9 @@ test('canonical shutdown and close parity share one concrete teardown mechanic',
   expect(shutdownRoute).not.toContain('ensureReadyUse');
   expect(shutdownRoute).not.toContain('target-shutdown');
 
-  expect(sessionCloseSource).toContain("from '../session-close-shutdown.ts'");
-  expect(closeAdapterSource).toContain('DeviceShutdownCloseCapability');
-  expect(closeAdapterSource).not.toContain('shutdownSimulator');
-  expect(closeAdapterSource).not.toContain('runAndroidAdb');
+  expect(sessionCloseSource).not.toContain('session-close-shutdown');
+  expect(appleLifecycleSource).toContain('host.deviceShutdown.apple.shutdownTarget');
+  expect(androidLifecycleSource).toContain('host.deviceShutdown.android.shutdownTarget');
 
   expect(sharedHostSource).toContain('createDeviceShutdownRuntimeHost');
   expect(sharedHostSource).toContain('shutdownTargetForClose');

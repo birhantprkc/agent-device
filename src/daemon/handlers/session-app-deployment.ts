@@ -20,6 +20,7 @@ import { requireSessionOrExplicitSelector, resolveCommandDevice } from './sessio
 import {
   requireRuntimeBinding,
   requireRuntimeFacts,
+  type RuntimeCommandHandlerParams,
   unavailableRuntimeOperationResponse,
 } from './session-runtime-admission.ts';
 
@@ -92,13 +93,9 @@ export async function handleAppDeploymentCommand(params: {
   }
 }
 
-export async function handlePushNotificationCommand(params: {
-  req: DaemonRequest;
-  sessionName: string;
-  sessionStore: SessionStore;
-  inspectFacts?: InspectDeviceRuntimeFacts;
-  bindDevice?: BindDeviceRuntime;
-}): Promise<DaemonResponse> {
+export async function handlePushNotificationCommand(
+  params: RuntimeCommandHandlerParams,
+): Promise<DaemonResponse> {
   const { req, sessionName, sessionStore } = params;
   const session = sessionStore.get(sessionName);
   const flags = req.flags ?? {};

@@ -63,7 +63,7 @@ vi.mock('../../../platforms/android/ime-lifecycle.ts', async (importOriginal) =>
 vi.mock('../../../platforms/apple/core/simulator.ts', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../../../platforms/apple/core/simulator.ts')>();
-  return { ...actual, getSimulatorState: vi.fn(async () => null), shutdownSimulator: vi.fn() };
+  return { ...actual, getSimulatorState: vi.fn(async () => null) };
 });
 vi.mock('../../../utils/exec.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../utils/exec.ts')>();
@@ -103,7 +103,6 @@ import {
 import { runMacOsAlertAction } from '../../../platforms/apple/os/macos/helper.ts';
 import { resolveAndroidPackageForOpen } from '../../../platform-runtime-open-target.ts';
 import { runCmd } from '../../../utils/exec.ts';
-import { shutdownSimulator } from '../../../platforms/apple/core/simulator.ts';
 import {
   resolveIosApp,
   resolveIosSimulatorDeepLinkBundleId,
@@ -128,7 +127,6 @@ export const mockCleanupRetainedMaterializedPaths = vi.mocked(
   cleanupRetainedMaterializedPathsForSession,
 );
 export const mockRunCmd = vi.mocked(runCmd);
-export const mockShutdownSimulator = vi.mocked(shutdownSimulator);
 export const mockResolveIosApp = vi.mocked(resolveIosApp);
 export const mockResolveIosSimulatorDeepLinkBundleId = vi.mocked(
   resolveIosSimulatorDeepLinkBundleId,
@@ -168,8 +166,6 @@ beforeEach(() => {
   mockCleanupRetainedMaterializedPaths.mockResolvedValue(undefined);
   mockRunCmd.mockReset();
   mockRunCmd.mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 });
-  mockShutdownSimulator.mockReset();
-  mockShutdownSimulator.mockResolvedValue({ success: true, exitCode: 0, stdout: '', stderr: '' });
   mockResolveIosApp.mockReset();
   mockResolveIosApp.mockImplementation(async (device, app) => {
     const normalizedApp = app.toLowerCase();

@@ -9,7 +9,7 @@ const unavailable: RuntimeOperationFact = Object.freeze({
 });
 
 /** Default facts for tests that are unrelated to application deployment. */
-export const unavailableDeploymentOperationFacts = Object.freeze({
+const unavailableDeploymentOperationFacts = Object.freeze({
   deployApp: unavailable,
   materializeAppSource: unavailable,
   deployMaterializedApp: unavailable,
@@ -17,7 +17,7 @@ export const unavailableDeploymentOperationFacts = Object.freeze({
 });
 
 /** Default fact for tests that are unrelated to explicit device shutdown. */
-export const unavailableShutdownOperationFacts = Object.freeze({
+const unavailableShutdownOperationFacts = Object.freeze({
   shutdownTarget: unavailable,
 });
 

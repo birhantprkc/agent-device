@@ -29,6 +29,7 @@ import {
   admitRuntimeUse,
   type UnavailableRuntimeResponse,
 } from '../runtime-admission.ts';
+import type { RuntimeCommandHandlerParams } from './session-runtime-admission.ts';
 
 const IOS_APPSTATE_SESSION_REQUIRED_MESSAGE =
   'iOS appstate requires an active session on the target device. Run open first (for example: open --session sim --platform ios --device "<name>" <app>).';
@@ -84,13 +85,7 @@ function hasAndroidAvdIdentity(
   );
 }
 
-async function handleAppStateCommand(params: {
-  req: DaemonRequest;
-  sessionName: string;
-  sessionStore: SessionStore;
-  inspectFacts?: InspectDeviceRuntimeFacts;
-  bindDevice?: BindDeviceRuntime;
-}): Promise<DaemonResponse> {
+async function handleAppStateCommand(params: RuntimeCommandHandlerParams): Promise<DaemonResponse> {
   const { req, sessionName, sessionStore } = params;
   const session = sessionStore.get(sessionName);
   const flags = req.flags ?? {};

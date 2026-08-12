@@ -1,8 +1,17 @@
 import type { RuntimeOperationFact } from '@agent-device/contracts/platform';
 import { AppError } from '@agent-device/kernel/errors';
 import type { BindDeviceRuntime, InspectDeviceRuntimeFacts } from '../request-runtime-binding.ts';
-import type { DaemonResponse } from '../types.ts';
+import type { SessionStore } from '../session-store.ts';
+import type { DaemonRequest, DaemonResponse } from '../types.ts';
 import { errorResponse } from './response.ts';
+
+export type RuntimeCommandHandlerParams = Readonly<{
+  req: DaemonRequest;
+  sessionName: string;
+  sessionStore: SessionStore;
+  inspectFacts?: InspectDeviceRuntimeFacts;
+  bindDevice?: BindDeviceRuntime;
+}>;
 
 /** Shared facts-first admission for request-scoped runtime command handlers. */
 export function unavailableRuntimeOperationResponse(
