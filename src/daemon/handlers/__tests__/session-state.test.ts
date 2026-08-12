@@ -155,6 +155,7 @@ test('appstate rejects a missing readiness fact even when appState is available'
       },
       bootTarget: { available: false, reason: 'unsupported-device-kind' },
       bootTargetHeadless: { available: false, reason: 'unsupported-device-kind' },
+      shutdownTarget: { available: false, reason: 'unsupported-device-kind' },
     },
   };
   const inspectFacts = vi.fn(async () => facts);
@@ -219,6 +220,7 @@ test('sessionless Android appstate inspects once, binds once, and preserves oper
       ensureReady: available,
       bootTarget: available,
       bootTargetHeadless: unavailable,
+      shutdownTarget: unavailable,
     },
   };
   const events: string[] = [];
