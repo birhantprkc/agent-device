@@ -9,6 +9,7 @@ import {
   type DeviceInfo,
 } from '@agent-device/kernel/device';
 import { emitDiagnostic } from '../utils/diagnostics.ts';
+import type { RuntimeOwnerRef } from '@agent-device/contracts/platform';
 import { acquireProcessLock } from '../utils/process-lock.ts';
 import { ownerIdentityMatches, readCurrentOwnerIdentity } from '../utils/owner-identity.ts';
 import { inspectDeviceClaimFile, type InspectedDeviceClaim } from './device-claim-inspection.ts';
@@ -54,16 +55,9 @@ export type DeviceClaimAcquireResult =
   | { status: 'acquired'; ownership: DeviceClaimSessionOwnership }
   | { status: 'conflict'; conflict: InspectedDeviceClaim };
 
-export function isLocalDeviceClaimTarget(
-  meta:
-    | {
-        leaseProvider?: string;
-        deviceKey?: string;
-      }
-    | undefined,
-  providerOwned: boolean,
-): boolean {
-  return !providerOwned && !meta?.leaseProvider && !meta?.deviceKey;
+/** Claim policy follows the admitted runtime owner, never request metadata. */
+export function isLocalDeviceClaimTarget(owner: RuntimeOwnerRef): boolean {
+  return owner.kind === 'local-family';
 }
 
 export async function acquireDeviceClaim(params: {

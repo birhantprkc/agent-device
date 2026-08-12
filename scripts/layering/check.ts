@@ -37,8 +37,6 @@
 //     table (appstate R22, shutdown R23, boot R20, devices R17, logs R14, network R15, record R16) and proves each command keeps
 //     exactly one platform-execution path — retired routes, admission, modules, and widened
 //     runtime access cannot coexist with its operation-fact-derived descriptor and handler.
-//   - Over CONTRACTS PRODUCTION SOURCE: contracts owns vocabulary only — host, process, and timer
-//     mechanics belong in capture-kit or an adapter (R18).
 // Only `(root)` is unranked among src/ zones (see `UNRANKED_ZONES` in model.ts):
 // it holds entrypoints and composition roots. Extracted workspace package zones
 // are classified separately and held behind R11 instead of the src folder spine.

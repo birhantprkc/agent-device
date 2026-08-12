@@ -2,8 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
   appStateLegacySessionHandlerViolations,
+  applicationLifecycleDurableResourceViolations,
   appLogSessionStateOwnershipViolations,
+  closeLifecycleRouteBindingViolations,
   devicesGatewayBindingViolations,
+  openLifecycleRouteBindingViolations,
+  prepareLifecycleRouteBindingViolations,
+  runtimeLifecycleRouteBindingViolations,
   sourceExecutedUsingDeclarationViolations,
 } from './runtime-command-cutover-extensions.ts';
 
@@ -173,4 +178,204 @@ test('appstate handler is green after legacy dispatch is removed', () => {
     ),
     [],
   );
+});
+
+const OPEN_HANDLER_FILE = 'src/daemon/handlers/session-open.ts';
+const PREPARE_HANDLER_FILE = 'src/daemon/handlers/session-prepare.ts';
+const CLOSE_HANDLER_FILE = 'src/daemon/handlers/session-close-runtime-admission.ts';
+const RUNTIME_HANDLER_FILE = 'src/daemon/handlers/session-runtime-command.ts';
+
+const RUNTIME_ADMISSION_FILE = 'src/daemon/runtime-admission.ts';
+
+const RUNTIME_ADMISSION_SOURCE = [
+  'export async function admitRuntimeOperations(request: any) {',
+  '  const facts = await requireFactsInspection(request.inspectFacts)(request.device);',
+  '  if (!facts.ok) return { type: "response" };',
+  '  return { type: "admitted", bind: requireDeviceBinding(request.bindDevice) };',
+  '}',
+].join('\n');
+
+function lifecycleAdmissionSource(functionName: string, admissionHelper: string): string {
+  return [
+    `async function ${functionName}(params: any) {`,
+    `  return await ${admissionHelper}({ ...params, command: 'x', use: params.use });`,
+    '}',
+  ].join('\n');
+}
+
+function lifecycleSources(entries: readonly (readonly [string, string])[]) {
+  return sources([...entries, [RUNTIME_ADMISSION_FILE, RUNTIME_ADMISSION_SOURCE]]);
+}
+
+test('lifecycle route proofs accept one shared admission per descriptor operation', () => {
+  assert.deepEqual(
+    openLifecycleRouteBindingViolations(
+      lifecycleSources([
+        [OPEN_HANDLER_FILE, lifecycleAdmissionSource('admitOpenRuntime', 'admitRuntimeOperations')],
+      ]),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    prepareLifecycleRouteBindingViolations(
+      lifecycleSources([
+        [PREPARE_HANDLER_FILE, lifecycleAdmissionSource('admitPrepareRuntime', 'admitRuntimeUse')],
+      ]),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    closeLifecycleRouteBindingViolations(
+      lifecycleSources([
+        [CLOSE_HANDLER_FILE, lifecycleAdmissionSource('admitCloseRuntime', 'admitRuntimeUse')],
+      ]),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    runtimeLifecycleRouteBindingViolations(
+      lifecycleSources([
+        [
+          RUNTIME_HANDLER_FILE,
+          [
+            lifecycleAdmissionSource('admitClearRuntime', 'admitRuntimeUse'),
+            lifecycleAdmissionSource('admitPortReverseRuntime', 'admitRuntimeUse'),
+          ].join('\n'),
+        ],
+      ]),
+    ),
+    [],
+  );
+});
+
+test('planted red: lifecycle route proof rejects a duplicate admission and legacy local dispatch', () => {
+  const violations = openLifecycleRouteBindingViolations(
+    lifecycleSources([
+      [
+        OPEN_HANDLER_FILE,
+        [
+          'async function admitOpenRuntime(params: any) {',
+          '  await admitRuntimeOperations(params);',
+          '  return await admitRuntimeOperations(params);',
+          '}',
+          'async function accidentalLegacyRoute() { await dispatchCommand(); }',
+        ].join('\n'),
+      ],
+    ]),
+  );
+
+  assert.match(
+    summaries(violations).join('\n'),
+    /admitOpenRuntime must make one shared runtime admission call \(found 2\)/,
+  );
+  assert.match(
+    summaries(violations).join('\n'),
+    /handler reaches legacy or local platform call dispatchCommand outside its bound runtime/,
+  );
+});
+
+test('planted red: lifecycle route proof rejects a handler that calls the raw gateway ports', () => {
+  const violations = closeLifecycleRouteBindingViolations(
+    lifecycleSources([
+      [
+        CLOSE_HANDLER_FILE,
+        [
+          'async function admitCloseRuntime(params: any) {',
+          '  return await admitRuntimeUse(params);',
+          '}',
+          'async function sneak(params: any) {',
+          '  const facts = await inspectFacts(params.device);',
+          '  return await bindDevice(params.device, facts);',
+          '}',
+        ].join('\n'),
+      ],
+    ]),
+  );
+
+  assert.match(summaries(violations).join('\n'), /platform call inspectFacts outside its bound/);
+  assert.match(summaries(violations).join('\n'), /platform call bindDevice outside its bound/);
+});
+
+test('planted red: lifecycle route proof rejects a shared admission with two facts inspections', () => {
+  const violations = openLifecycleRouteBindingViolations(
+    sources([
+      [OPEN_HANDLER_FILE, lifecycleAdmissionSource('admitOpenRuntime', 'admitRuntimeOperations')],
+      [
+        RUNTIME_ADMISSION_FILE,
+        [
+          'export async function admitRuntimeOperations(request: any) {',
+          '  await requireFactsInspection(request.inspectFacts)(request.device);',
+          '  await requireFactsInspection(request.inspectFacts)(request.device);',
+          '  return { type: "admitted", bind: requireDeviceBinding(request.bindDevice) };',
+          '}',
+        ].join('\n'),
+      ],
+    ]),
+  );
+
+  assert.match(
+    summaries(violations).join('\n'),
+    /shared runtime admission must make one facts inspection call \(found 2\)/,
+  );
+});
+
+const APPLICATION_RESOURCES_FILE = 'src/platform-runtime-application-resources.ts';
+
+test('lifecycle durable proof rejects a generic capture-kit lifecycle role and an unfenced IME mutation', () => {
+  const violations = applicationLifecycleDurableResourceViolations(
+    sources([
+      ['src/platform-runtime-gateway.ts', 'runStartupRecoveryFence();'],
+      [
+        APPLICATION_RESOURCES_FILE,
+        'hasTestImeRecoveryEvidence(input.stateDir); recoverTestImeStartup(input);',
+      ],
+      ['src/platforms/android/ime-lifecycle.ts', 'const adb = resolveAndroidAdbExecutor(device);'],
+      [
+        'packages/capture-kit/src/platform-runtime-unavailable.ts',
+        'const lifecycle = Object.freeze({ ...network });',
+      ],
+    ]),
+  );
+
+  assert.match(summaries(violations).join('\n'), /must wait for startup recovery/);
+  assert.match(
+    summaries(violations).join('\n'),
+    /must not own a generic platform-runtime lifecycle role/,
+  );
+});
+
+test('planted red: lifecycle durable proof rejects a gateway that names a platform durable owner', () => {
+  const violations = applicationLifecycleDurableResourceViolations(
+    sources([
+      [
+        'src/platform-runtime-gateway.ts',
+        'runStartupRecoveryFence(); host.androidApplications.recoverTestImeStartup(input);',
+      ],
+      [
+        APPLICATION_RESOURCES_FILE,
+        'hasTestImeRecoveryEvidence(input.stateDir); recoverTestImeStartup(input);',
+      ],
+      [
+        'src/platforms/android/ime-lifecycle.ts',
+        'await waitForStartupRecoveryFence(options.stateDir); const adb = resolveAndroidAdbExecutor(device);',
+      ],
+    ]),
+  );
+
+  assert.match(summaries(violations).join('\n'), /name no platform-specific durable owner/);
+});
+
+test('planted red: lifecycle durable proof rejects unevidenced Android startup recovery', () => {
+  const violations = applicationLifecycleDurableResourceViolations(
+    sources([
+      ['src/platform-runtime-gateway.ts', 'runStartupRecoveryFence();'],
+      [APPLICATION_RESOURCES_FILE, 'recoverTestImeStartup(input);'],
+      [
+        'src/platforms/android/ime-lifecycle.ts',
+        'await waitForStartupRecoveryFence(options.stateDir); const adb = resolveAndroidAdbExecutor(device);',
+      ],
+    ]),
+  );
+
+  assert.match(summaries(violations).join('\n'), /gate lazy Android test-IME recovery/);
 });

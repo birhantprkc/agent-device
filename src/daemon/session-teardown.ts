@@ -1,12 +1,8 @@
 import { AppError } from '@agent-device/kernel/errors';
 import { emitDiagnostic } from '../utils/diagnostics.ts';
-import { isMacOs, isApplePlatform } from '@agent-device/kernel/device';
-import { runMacOsAlertAction } from '../platforms/apple/os/macos/helper.ts';
-import { stopIosRunnerSession } from '../platforms/apple/core/runner/runner-client.ts';
 import { cleanupAppleXctracePerfCapture } from '../platforms/apple/core/perf-xctrace.ts';
 import { cleanupAndroidNativePerfSession } from '../platforms/android/perf.ts';
 import { stopAndroidSnapshotHelperSessionForDevice } from '../platforms/android/snapshot-helper.ts';
-import { restoreAndroidTestIme } from '../platforms/android/ime-lifecycle.ts';
 import { cleanupRetainedMaterializedPathsForSession } from './materialized-path-registry.ts';
 import { stopSessionAudioProbe } from './audio-probe.ts';
 import type { SessionState } from './types.ts';
@@ -16,30 +12,6 @@ import { appLogResourceStore } from './app-log-resource-store.ts';
 import { finishLiveScreenRecording } from './screen-recording-session-resource.ts';
 
 export { stopSessionAudioProbe } from './audio-probe.ts';
-
-export async function stopAppleRunnerForClose(session: SessionState): Promise<void> {
-  await stopIosRunnerSession(session.device.id);
-  if (!isMacOs(session.device)) {
-    return;
-  }
-
-  const dismissOptions =
-    session.surface === 'frontmost-app'
-      ? { surface: 'frontmost-app' as const }
-      : session.appBundleId
-        ? { bundleId: session.appBundleId }
-        : {};
-  await runMacOsAlertAction('dismiss', dismissOptions).catch((error) => {
-    emitDiagnostic({
-      level: 'debug',
-      phase: 'macos_close_alert_dismiss_failed',
-      data: {
-        session: session.name,
-        error: error instanceof Error ? error.message : String(error),
-      },
-    });
-  });
-}
 
 export async function stopSessionAppLog(params: {
   session: SessionState;
@@ -72,32 +44,6 @@ export async function stopSessionAndroidNativePerfCapture(session: SessionState)
 export async function stopSessionAndroidSnapshotHelper(session: SessionState): Promise<void> {
   if (session.device.platform !== 'android') return;
   await stopAndroidSnapshotHelperSessionForDevice(session.device);
-}
-
-export async function restoreSessionAndroidIme(
-  session: SessionState,
-  stateDir?: string,
-): Promise<void> {
-  if (session.device.platform !== 'android') return;
-  try {
-    const result = await restoreAndroidTestIme(session.device, { stateDir });
-    if (result.reason !== 'set-failed') return;
-    throw new AppError(
-      'COMMAND_FAILED',
-      `Android test IME could not be restored on ${session.device.name ?? session.device.id}.`,
-      { reason: 'android_test_ime_restore_incomplete', deviceId: session.device.id },
-    );
-  } catch (error) {
-    emitDiagnostic({
-      level: 'warn',
-      phase: 'android_test_ime_restore_failed',
-      data: {
-        session: session.name,
-        error: error instanceof Error ? error.message : String(error),
-      },
-    });
-    throw error;
-  }
 }
 
 type SessionCleanupStep = { step: string; run: () => Promise<void> };
@@ -165,7 +111,7 @@ type SessionResourceTeardownRequest = {
 export async function teardownSessionResources(
   request: SessionResourceTeardownRequest,
 ): Promise<void> {
-  const { session, sessionName, sessionStore, stateDir } = request;
+  const { session, sessionName, sessionStore } = request;
   const appLogSteps: SessionCleanupStep[] =
     request.appLog === 'run'
       ? [
@@ -200,11 +146,7 @@ export async function teardownSessionResources(
     { step: 'apple_perf', run: () => stopSessionApplePerfCapture(session) },
     { step: 'android_native_perf', run: () => stopSessionAndroidNativePerfCapture(session) },
     { step: 'android_snapshot_helper', run: () => stopSessionAndroidSnapshotHelper(session) },
-    { step: 'android_ime', run: () => restoreSessionAndroidIme(session, stateDir) },
   ];
-  if (isApplePlatform(session.device.platform)) {
-    steps.push({ step: 'apple_runner', run: () => stopAppleRunnerForClose(session) });
-  }
   steps.push({
     step: 'materialized_paths',
     run: () => cleanupRetainedMaterializedPathsForSession(sessionName),

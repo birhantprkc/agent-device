@@ -8,9 +8,9 @@ import { mkdtempForTestSync } from '../../__tests__/test-utils/tmp-dir.ts';
 
 vi.mock('../device-ready.ts', () => ({ ensureDeviceReady: vi.fn(async () => {}) }));
 
-vi.mock('../runtime-hints.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../runtime-hints.ts')>();
-  return { ...actual, applyRuntimeHintsToApp: vi.fn(async () => {}) };
+vi.mock('../../platform-runtime-runtime-hints.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../platform-runtime-runtime-hints.ts')>();
+  return { ...actual, applyRuntimeHintValues: vi.fn(async () => {}) };
 });
 
 vi.mock('../../platforms/apple/core/runner/runner-client.ts', async (importOriginal) => {
@@ -28,22 +28,23 @@ vi.mock('../../platforms/apple/core/apps.ts', async (importOriginal) => {
   };
 });
 
-vi.mock('../handlers/session-device-utils.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../handlers/session-device-utils.ts')>();
-  return { ...actual, settleIosSimulator: vi.fn(async () => {}) };
-});
-
 import { dispatchCommand } from '../../core/dispatch.ts';
 import { IOS_SIMULATOR } from '../../__tests__/test-utils/device-fixtures.ts';
 import { makeIosSession } from '../../__tests__/test-utils/session-factories.ts';
 import { makeSessionStore } from '../../__tests__/test-utils/store-factory.ts';
 import { LeaseRegistry } from '../lease-registry.ts';
-import { createRequestHandler } from './test-device-runtime-gateway.ts';
+import {
+  createRequestHandler,
+  lifecycleDeviceRuntimeGateway,
+} from './test-device-runtime-gateway.ts';
 import { ensureDeviceReady } from '../device-ready.ts';
+// Readiness is package-owned; hold the open at the fixture's platform-neutral readiness gate.
+import { awaitFixtureReadiness } from './application-lifecycle-runtime-fixture.ts';
 
 const mockDispatch = vi.mocked(dispatchCommand);
 const mockResolveTargetDevice = vi.mocked(getResolveTargetDeviceMock());
 const mockEnsureDeviceReady = vi.mocked(ensureDeviceReady);
+const mockAwaitFixtureReadiness = vi.mocked(awaitFixtureReadiness);
 
 beforeEach(() => {
   mockDispatch.mockReset();
@@ -52,6 +53,8 @@ beforeEach(() => {
   mockResolveTargetDevice.mockResolvedValue(IOS_SIMULATOR);
   mockEnsureDeviceReady.mockReset();
   mockEnsureDeviceReady.mockResolvedValue();
+  mockAwaitFixtureReadiness.mockReset();
+  mockAwaitFixtureReadiness.mockResolvedValue(undefined);
 });
 
 test('replay runs active-session actions inside the parent request provider scope', async () => {
@@ -67,6 +70,7 @@ test('replay runs active-session actions inside the parent request provider scop
     token: 'test-token',
     sessionStore,
     leaseRegistry: new LeaseRegistry(),
+    deviceRuntimeGateway: lifecycleDeviceRuntimeGateway,
     deviceInventoryGateways: createTestDeviceInventoryGateways(),
     appleRunnerProvider,
     trackDownloadableArtifact: () => 'artifact-id',
@@ -98,6 +102,7 @@ test('replay routes session-changing actions through the full request path', asy
     token: 'test-token',
     sessionStore,
     leaseRegistry: new LeaseRegistry(),
+    deviceRuntimeGateway: lifecycleDeviceRuntimeGateway,
     deviceInventoryGateways: createTestDeviceInventoryGateways(),
     appleRunnerProvider,
     trackDownloadableArtifact: () => 'artifact-id',
@@ -127,6 +132,7 @@ test('session list includes a cwd-scoped session opened by replay', async () => 
     token: 'test-token',
     sessionStore,
     leaseRegistry: new LeaseRegistry(),
+    deviceRuntimeGateway: lifecycleDeviceRuntimeGateway,
     deviceInventoryGateways: createTestDeviceInventoryGateways(),
     appleRunnerProvider: () => undefined,
     trackDownloadableArtifact: () => 'artifact-id',
@@ -179,7 +185,7 @@ test('fresh replay retains a dynamically selected device through finalization', 
   const readinessEntered = new Promise<void>((resolve) => {
     markReadinessEntered = resolve;
   });
-  mockEnsureDeviceReady.mockImplementation(async () => {
+  mockAwaitFixtureReadiness.mockImplementation(async () => {
     markReadinessEntered();
     await readinessReleased;
   });
@@ -189,6 +195,7 @@ test('fresh replay retains a dynamically selected device through finalization', 
     token: 'test-token',
     sessionStore,
     leaseRegistry,
+    deviceRuntimeGateway: lifecycleDeviceRuntimeGateway,
     deviceInventoryGateways: createTestDeviceInventoryGateways(),
     appleRunnerProvider: () => undefined,
     trackDownloadableArtifact: () => 'artifact-id',

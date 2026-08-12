@@ -48,18 +48,17 @@ test('Vega plugin owns the Vega platform and tv-remote capability bucket', () =>
     'tv-remote currently supports only Vega Virtual Devices.',
   );
 
-  for (const command of [
-    PUBLIC_COMMANDS.open,
-    PUBLIC_COMMANDS.close,
-    PUBLIC_COMMANDS.back,
-    PUBLIC_COMMANDS.home,
-  ]) {
+  for (const command of [PUBLIC_COMMANDS.back, PUBLIC_COMMANDS.home]) {
     const supports = vegaPlugin.capability.supportsByDefault[command];
     assert.ok(supports);
     assert.equal(supports(VEGA_VVD), true);
     assert.equal(supports(VEGA_PHYSICAL_TV), true);
     assert.equal(supports(VEGA_NON_TV), false);
   }
+
+  // Lifecycle support belongs to exact runtime facts, not this legacy capability facet.
+  assert.equal(vegaPlugin.capability.supportsByDefault[PUBLIC_COMMANDS.open], undefined);
+  assert.equal(vegaPlugin.capability.supportsByDefault[PUBLIC_COMMANDS.close], undefined);
 });
 
 test('Vega plugin creates the Vega interactor lazily', async () => {

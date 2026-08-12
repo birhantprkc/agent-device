@@ -21,6 +21,9 @@ export {
 
 export { makeSnapshotState } from './snapshot-builders.ts';
 
+export { ANDROID_IME_HELPER_FIXTURE_ARTIFACT } from './android-ime-helper.ts';
+export { mkdtempForTest } from './tmp-dir.ts';
+
 export {
   ANDROID_SNAPSHOT_HELPER_FIXTURE_ARTIFACT,
   androidSnapshotHelperOutput,
@@ -51,8 +54,6 @@ export {
 } from './property-arbitraries.ts';
 
 export { withNoColor } from './color.ts';
-
-export { mkdtempForTest } from './tmp-dir.ts';
 
 export { likelyPlayableWebmContainer } from './video-fixtures.ts';
 

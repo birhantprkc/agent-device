@@ -18,6 +18,12 @@ export type DeviceReadinessRuntimeHost = Readonly<{
   }>;
   appleAutomation: Readonly<{
     keepHot(device: DeviceInfo): void;
+    /**
+     * Publishes a FRESH Booted observation. `simctl list devices -j` costs ~0.7s per spawn and one
+     * flow makes several boot checks, so the host memoizes what readiness just observed. Callers
+     * must never publish a cached or persisted listing.
+     */
+    markBooted(device: DeviceInfo): void;
   }>;
   androidEmulator: Readonly<{
     discover(request: DeviceInventoryRequest, signal: AbortSignal): Promise<readonly DeviceInfo[]>;

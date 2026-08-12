@@ -12,10 +12,6 @@ import { errorResponse } from './response.ts';
 
 export { isIosSimulator };
 
-export const IOS_SIMULATOR_POST_CLOSE_SETTLE_MS = 300;
-
-export const IOS_SIMULATOR_POST_OPEN_SETTLE_MS = 300;
-
 export function requireSessionOrExplicitSelector(
   command: string,
   session: SessionState | undefined,
@@ -32,11 +28,6 @@ export function requireSessionOrExplicitSelector(
 
 export function hasExplicitSessionFlag(flags: DaemonRequest['flags'] | undefined): boolean {
   return typeof flags?.session === 'string' && flags.session.trim().length > 0;
-}
-
-export async function settleIosSimulator(device: DeviceInfo, delayMs: number): Promise<void> {
-  if (isActiveProviderDevice(device) || !isIosSimulator(device) || delayMs <= 0) return;
-  await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
 }
 
 export async function resolveCommandDevice(params: {

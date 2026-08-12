@@ -4,14 +4,13 @@ import * as path from 'node:path';
 import { LeaseRegistry } from '../../lease-registry.ts';
 import { setActiveProviderDeviceRuntimes } from '../../../provider-device-runtime.ts';
 import {
-  mockDispatch,
+  mockLifecycleDispatch as mockDispatch,
   mockResolveTargetDevice,
   mockPrewarmIosRunnerSession,
   mockNotifyIosRunnerAppRelaunched,
   mockStopIosRunner,
   mockScheduleIosRunnerIdleStop,
   mockDismissMacOsAlert,
-  mockSettleSimulator,
   makeSessionStore,
   makeSession,
   noopInvoke,
@@ -104,7 +103,7 @@ test('open --relaunch leaves the old frame expired when the close dispatch fails
   expect(sessionStore.get(sessionName)?.refFrameState).toBe('expired');
 });
 
-test('open --relaunch skips provider pre-close before first provider session exists', async () => {
+test('open --relaunch does not let an ambient provider claim suppress a local pre-close', async () => {
   const sessionStore = makeSessionStore();
   const sessionName = 'provider-android-session';
   const device = {
@@ -149,7 +148,10 @@ test('open --relaunch skips provider pre-close before first provider session exi
 
     expect(response).toBeTruthy();
     expect(response?.ok).toBe(true);
-    expect(calls).toEqual([{ command: 'open', positionals: ['com.example.app'] }]);
+    expect(calls).toEqual([
+      { command: 'close', positionals: ['com.example.app'] },
+      { command: 'open', positionals: ['com.example.app'] },
+    ]);
   } finally {
     setActiveProviderDeviceRuntimes([]);
   }
@@ -464,52 +466,6 @@ test('open --relaunch on iOS without existing session closes then opens target a
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(true);
   expect(calls).toEqual(['stop-runner', 'close:com.example.app', 'open:com.example.app']);
-});
-
-test('open --relaunch on iOS simulator settles once after the collapsed open', async () => {
-  const sessionStore = makeSessionStore();
-  const sessionName = 'ios-sim-session';
-  sessionStore.set(sessionName, {
-    ...makeSession(sessionName, {
-      platform: 'apple',
-      id: 'sim-1',
-      name: 'iPhone 16',
-      kind: 'simulator',
-      booted: true,
-    }),
-    appName: 'com.example.app',
-  });
-
-  mockResolveTargetDevice.mockResolvedValue({
-    platform: 'apple',
-    id: 'sim-1',
-    name: 'iPhone 16',
-    kind: 'simulator',
-    booted: true,
-  });
-  const settleCalls: Array<{ deviceId: string; delayMs: number }> = [];
-  mockSettleSimulator.mockImplementation(async (device, delayMs) => {
-    settleCalls.push({ deviceId: device.id, delayMs });
-  });
-
-  const response = await handleSessionCommands({
-    req: {
-      token: 't',
-      session: sessionName,
-      command: 'open',
-      positionals: [],
-      flags: { relaunch: true },
-    },
-    sessionName,
-    logPath: path.join(os.tmpdir(), 'daemon.log'),
-    sessionStore,
-    invoke: noopInvoke,
-  });
-
-  expect(response).toBeTruthy();
-  expect(response?.ok).toBe(true);
-  // Collapsed simulator relaunch skips the post-close settle: one settle after open.
-  expect(settleCalls).toEqual([{ deviceId: 'sim-1', delayMs: 300 }]);
 });
 
 test('close on macOS session stops runner and dismisses automation alert before delete', async () => {
@@ -896,7 +852,6 @@ test('close <app> on macOS stops runner before app close dispatch and dismisses 
   expect(response?.ok).toBe(true);
   expect(calls).toEqual([
     'stop-runner:host-macos-local',
-    'dismiss-alert:dismiss:com.apple.systempreferences',
     'close:System Settings',
     'stop-runner:host-macos-local',
     'dismiss-alert:dismiss:com.apple.systempreferences',

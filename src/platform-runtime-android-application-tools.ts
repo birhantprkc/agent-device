@@ -1,0 +1,97 @@
+import type {
+  AndroidApplicationTools,
+  OpenTargetResolution,
+  OpenTargetResolutionInput,
+} from '@agent-device/contracts/platform';
+import type { DeviceInfo } from '@agent-device/kernel/device';
+import { AppError } from '@agent-device/kernel/errors';
+import { emitDiagnostic } from './utils/diagnostics.ts';
+
+/** Lazy Android tools; the Android package owns lifecycle sequencing and durable IME policy. */
+export function createAndroidApplicationTools(): AndroidApplicationTools {
+  return Object.freeze({
+    resolveOpenTarget: async (device, input) => await resolveAndroidOpenTarget(device, input),
+    inferOpenedAppBundleId: async (device, target, currentAppBundleId) => {
+      const { inferAndroidPackageAfterOpen } = await import('./platform-runtime-open-target.ts');
+      return await inferAndroidPackageAfterOpen(device, target, currentAppBundleId);
+    },
+    resetFramePerfStats: async (device, appBundleId) => {
+      const { resetAndroidFramePerfStats } = await import('./platforms/android/perf.ts');
+      await resetAndroidFramePerfStats(device, appBundleId);
+    },
+    applyRuntimeHints: async (device, input) => {
+      const { applyRuntimeHintValues } = await import('./platform-runtime-runtime-hints.ts');
+      await applyRuntimeHintValues({ device, ...input });
+    },
+    clearRuntimeHints: async (device, input) => {
+      const { clearRuntimeHintValues } = await import('./platform-runtime-runtime-hints.ts');
+      await clearRuntimeHintValues({ device, ...input });
+    },
+    activateTestIme: async (device, input) => {
+      const { activateAndroidTestIme } = await import('./platforms/android/ime-lifecycle.ts');
+      // Anything this rejects with — startup fence, recovery lock, or a failure after durable
+      // state was touched — propagates. Test IME is an opt-out text-entry accelerator, so only the
+      // typed helper-unavailable outcome falls back to the ordinary text-entry path.
+      const result = await activateAndroidTestIme(device, input);
+      if (result.outcome === 'helper-unavailable') {
+        emitDiagnostic({
+          level: 'warn',
+          phase: 'android_test_ime_activate_failed',
+          data: { device: device.id, error: result.reason },
+        });
+        return;
+      }
+      if (!result.persistFailed) return;
+      throw new AppError(
+        'COMMAND_FAILED',
+        `Android test IME recovery records could not be persisted for ${device.name ?? device.id}.`,
+        { reason: 'android_test_ime_recovery_fence_failed', deviceId: device.id },
+      );
+    },
+    restoreTestIme: async (device, input) => {
+      const { restoreAndroidTestIme } = await import('./platforms/android/ime-lifecycle.ts');
+      const result = await restoreAndroidTestIme(device, { stateDir: input.stateDir });
+      if (result.reason !== 'set-failed') return;
+      throw new AppError(
+        'COMMAND_FAILED',
+        `Android test IME could not be restored on ${device.name ?? device.id}.`,
+        { reason: 'android_test_ime_restore_incomplete', deviceId: device.id },
+      );
+    },
+    recoverTestImeStartup: async (input) => {
+      const { listAndroidAdbSerialsQuick, restoreOrphanedAndroidTestImeOnDaemonStartup } =
+        await import('./platforms/android/ime-lifecycle.ts');
+      await restoreOrphanedAndroidTestImeOnDaemonStartup({
+        stateDir: input.stateDir,
+        listSerials: listAndroidAdbSerialsQuick,
+      });
+    },
+    hasTestImeRecoveryEvidence: async (stateDir) => {
+      const { readAndroidTestImeRecoveryMarkers } =
+        await import('./platforms/android/ime-recovery-marker.ts');
+      return (await readAndroidTestImeRecoveryMarkers(stateDir)).length > 0;
+    },
+    shutdownTarget: async (device) => {
+      if (device.platform !== 'android' || device.kind !== 'emulator') return undefined;
+      const { shutdownDeviceTarget } = await import('./daemon/target-shutdown.ts');
+      return await shutdownDeviceTarget(device);
+    },
+  });
+}
+
+async function resolveAndroidOpenTarget(
+  device: DeviceInfo,
+  input: OpenTargetResolutionInput,
+): Promise<OpenTargetResolution> {
+  const { resolveAndroidPackageForOpen, resolveSessionAppBundleIdForTarget } =
+    await import('./platform-runtime-open-target.ts');
+  return {
+    appBundleId: await resolveSessionAppBundleIdForTarget(
+      device,
+      input.target,
+      input.currentAppBundleId,
+      resolveAndroidPackageForOpen,
+    ),
+    appName: input.target,
+  };
+}

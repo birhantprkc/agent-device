@@ -7,21 +7,25 @@ const PACKAGE = 'com.callstack.agentdevice.imehelper';
 // fresh checkout that hasn't packaged the helper won't have — CI's Coverage job included).
 vi.mock('../ime-helper.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../ime-helper.ts')>();
+  // Lazy: the factory is hoisted above this file's top-level constants.
+  const artifact = () => ({
+    apkPath: '/fixture/helper.apk',
+    manifest: {
+      name: 'android-ime-helper' as const,
+      version: '0.0.0',
+      assetName: 'helper.apk',
+      sha256: 'a'.repeat(64),
+      packageName: PACKAGE,
+      versionCode: 1,
+      serviceComponent: 'com.callstack.agentdevice.imehelper/.TestInputMethodService',
+      broadcastProtocol: 'android-ime-helper-v1' as const,
+    },
+  });
   return {
     ...actual,
-    resolveAndroidImeHelperArtifact: vi.fn(async () => ({
-      apkPath: '/fixture/helper.apk',
-      manifest: {
-        name: 'android-ime-helper' as const,
-        version: '0.0.0',
-        assetName: 'helper.apk',
-        sha256: 'a'.repeat(64),
-        packageName: PACKAGE,
-        versionCode: 1,
-        serviceComponent: 'com.callstack.agentdevice.imehelper/.TestInputMethodService',
-        broadcastProtocol: 'android-ime-helper-v1' as const,
-      },
-    })),
+    // Both the bundled resolver and the provider-aware selector answer with this fixture.
+    resolveAndroidImeHelperArtifact: vi.fn(async () => artifact()),
+    selectAndroidImeHelperArtifact: vi.fn(async () => artifact()),
   };
 });
 

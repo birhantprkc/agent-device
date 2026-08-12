@@ -39,23 +39,19 @@ vi.mock('../../../platforms/apple/core/perf-xctrace.ts', async (importOriginal) 
     await importOriginal<typeof import('../../../platforms/apple/core/perf-xctrace.ts')>();
   return { ...actual, cleanupAppleXctracePerfCapture: vi.fn(async () => ({})) };
 });
-vi.mock('../../runtime-hints.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../runtime-hints.ts')>();
-  return { ...actual, clearRuntimeHintsFromApp: vi.fn(async () => {}) };
+vi.mock('../../../platform-runtime-runtime-hints.ts', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../platform-runtime-runtime-hints.ts')>();
+  return { ...actual, clearRuntimeHintValues: vi.fn(async () => {}) };
 });
 vi.mock('../../../core/dispatch.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../core/dispatch.ts')>();
   return { ...actual, dispatchCommand: vi.fn(async () => ({})), resolveTargetDevice: vi.fn() };
 });
-vi.mock('../session-device-utils.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../session-device-utils.ts')>();
-  return { ...actual, settleIosSimulator: vi.fn(async () => {}) };
-});
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { runReplayScriptFile } from '../session-replay-runtime.ts';
-import { handleCloseCommand } from '../session-close.ts';
+import { handleCloseCommand as handleProductionCloseCommand } from '../session-close.ts';
 import { SessionStore } from '../../session-store.ts';
 import { LeaseRegistry } from '../../lease-registry.ts';
 import { dispatchCommand } from '../../../core/dispatch.ts';
@@ -69,8 +65,22 @@ import {
   writeReplayFile,
 } from './session-replay-runtime.fixtures.ts';
 import { freshEvidence, makeRecordingReplayInvoke } from './session-replay-repair.fixtures.ts';
+import {
+  bindLifecycleRuntime,
+  inspectLifecycleRuntimeFacts,
+} from './application-lifecycle-runtime-harness.ts';
 
 const mockDispatchCommand = vi.mocked(dispatchCommand);
+
+function handleCloseCommand(
+  params: Omit<Parameters<typeof handleProductionCloseCommand>[0], 'inspectFacts' | 'bindDevice'>,
+) {
+  return handleProductionCloseCommand({
+    ...params,
+    inspectFacts: inspectLifecycleRuntimeFacts,
+    bindDevice: bindLifecycleRuntime,
+  });
+}
 
 beforeEach(() => {
   mockDispatchCommand.mockReset();

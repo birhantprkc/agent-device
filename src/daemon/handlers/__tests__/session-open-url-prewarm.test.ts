@@ -3,9 +3,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { AppError } from '@agent-device/kernel/errors';
 import {
-  mockDispatch,
+  mockLifecycleDispatch as mockDispatch,
   mockResolveTargetDevice,
-  mockEnsureDeviceReady,
   mockPrewarmIosRunnerSession,
   mockNotifyIosRunnerAppRelaunched,
   mockPrewarmAppleRunnerCache,
@@ -17,7 +16,11 @@ import {
   noopInvoke,
 } from './session-test-harness.ts';
 import type { SessionState } from '../../types.ts';
-import { handleSessionCommands } from './session-command-harness.ts';
+import {
+  handleSessionCommands,
+  mockBindDeviceRuntime,
+  mockInspectDeviceRuntimeFacts,
+} from './session-command-harness.ts';
 
 test('open URL on existing iOS session clears stale app bundle id', async () => {
   const sessionStore = makeSessionStore();
@@ -201,10 +204,6 @@ test('open custom URL on existing iOS simulator session preserves app bundle id 
 
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(true);
-  expect(mockEnsureDeviceReady.mock.calls[0]?.[1]).toEqual({
-    deviceHub: false,
-    onIosSimulatorColdBootStart: undefined,
-  });
   const updated = sessionStore.get(sessionName);
   expect(updated?.appBundleId).toBe('com.example.app');
   expect(updated?.appName).toBe('myapp://item/42');
@@ -286,17 +285,18 @@ test('open iOS simulator app prewarms runner cache during cold boot', async () =
 
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(true);
-  const onColdBootStart = mockEnsureDeviceReady.mock.calls[0]?.[1]?.onIosSimulatorColdBootStart;
-  expect(onColdBootStart).toBeTypeOf('function');
-  onColdBootStart?.(device);
-  expect(mockPrewarmAppleRunnerCache).toHaveBeenCalledWith(
-    device,
-    expect.objectContaining({
-      logPath: expect.stringMatching(/daemon\.log$/),
-      requestId: 'open-request',
-    }),
-  );
-  expect(mockPrewarmIosRunnerSession).toHaveBeenCalledTimes(1);
+  // Readiness is package-owned now: a cold boot runs the binding's onColdBootStart hook, which
+  // is what starts the runner-cache warm in parallel with the boot.
+  await vi.waitFor(() => {
+    expect(mockPrewarmAppleRunnerCache).toHaveBeenCalledWith(
+      device,
+      expect.objectContaining({
+        logPath: expect.stringMatching(/daemon\.log$/),
+        requestId: 'open-request',
+      }),
+    );
+    expect(mockPrewarmIosRunnerSession).toHaveBeenCalledTimes(1);
+  });
 });
 
 test('open iOS app session prewarms runner session when app bundle id is known', async () => {
@@ -330,11 +330,13 @@ test('open iOS app session prewarms runner session when app bundle id is known',
 
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(true);
-  expect(mockPrewarmIosRunnerSession).toHaveBeenCalledTimes(1);
-  expect(mockPrewarmIosRunnerSession).toHaveBeenCalledWith(
-    expect.objectContaining({ platform: 'apple', id: 'ios-device-1' }),
-    expect.objectContaining({ logPath: expect.stringMatching(/daemon\.log$/) }),
-  );
+  await vi.waitFor(() => {
+    expect(mockPrewarmIosRunnerSession).toHaveBeenCalledTimes(1);
+    expect(mockPrewarmIosRunnerSession).toHaveBeenCalledWith(
+      expect.objectContaining({ platform: 'apple', id: 'ios-device-1' }),
+      expect.objectContaining({ logPath: expect.stringMatching(/daemon\.log$/) }),
+    );
+  });
 });
 
 test('open iOS Maestro app link waits for runner prewarm before launching app', async () => {
@@ -562,9 +564,10 @@ test('prepare ios-runner starts the XCTest runner on an explicit iOS selector', 
 
   expect(response).toBeTruthy();
   expect(response?.ok).toBe(true);
-  expect(mockEnsureDeviceReady).toHaveBeenCalledWith(
-    expect.objectContaining({ platform: 'apple', id: 'sim-1' }),
-  );
+  expect(mockInspectDeviceRuntimeFacts).toHaveBeenCalledTimes(1);
+  expect(mockBindDeviceRuntime).toHaveBeenCalledTimes(1);
+  // Readiness runs inside the admitted Apple binding now, so `prepare` proves it by reaching the
+  // runner at all rather than by observing the retired root readiness call.
   expect(mockPrepareIosRunner).toHaveBeenCalledTimes(1);
   expect(mockPrepareIosRunner).toHaveBeenCalledWith(
     expect.objectContaining({ platform: 'apple', id: 'sim-1' }),
@@ -599,9 +602,9 @@ test('prepare ios-runner starts the XCTest runner on an explicit iOS selector', 
 test('prepare ios-runner explains overlapping timing fields with additive parts', async () => {
   const sessionStore = makeSessionStore();
   const sessionName = 'prepare-ios-runner-timing';
-  const dateNow = vi.spyOn(Date, 'now');
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(1_000));
   try {
-    dateNow.mockReturnValueOnce(1_000).mockReturnValueOnce(28_337);
     mockResolveTargetDevice.mockResolvedValue({
       platform: 'apple',
       id: 'sim-1',
@@ -609,11 +612,14 @@ test('prepare ios-runner explains overlapping timing fields with additive parts'
       kind: 'simulator',
       booted: true,
     });
-    mockPrepareIosRunner.mockResolvedValueOnce({
-      runner: { currentUptimeMs: 42 },
-      buildMs: 10_642,
-      connectMs: 12_635,
-      healthCheckMs: 14_702,
+    mockPrepareIosRunner.mockImplementationOnce(async () => {
+      vi.setSystemTime(new Date(28_337));
+      return {
+        runner: { currentUptimeMs: 42 },
+        buildMs: 10_642,
+        connectMs: 12_635,
+        healthCheckMs: 14_702,
+      };
     });
 
     const response = await handleSessionCommands({
@@ -633,12 +639,11 @@ test('prepare ios-runner explains overlapping timing fields with additive parts'
     expect(response?.ok).toBe(true);
     const data = (response as any).data;
     expect(data).toMatchObject({
-      durationMs: 27_337,
       buildMs: 10_642,
       connectMs: 12_635,
       healthCheckMs: 14_702,
       timing: {
-        totalMs: 27_337,
+        totalMs: expect.any(Number),
         additiveParts: {
           buildMs: 10_642,
           connectAfterBuildMs: 1_993,
@@ -650,13 +655,15 @@ test('prepare ios-runner explains overlapping timing fields with additive parts'
         },
       },
     });
+    expect(data.durationMs).toBe(27_337);
+    expect(data.timing.totalMs).toBe(data.durationMs);
     expect(String(data.timing.note)).toMatch(/top-level prepare timing fields.*may overlap/i);
     const additiveParts = data.timing.additiveParts as Record<string, number>;
     const additiveTotalMs = Object.values(additiveParts).reduce((sum, value) => sum + value, 0);
     expect(additiveTotalMs).toBeLessThanOrEqual(data.timing.totalMs);
     expect(data.buildMs + data.connectMs + data.healthCheckMs).toBeGreaterThan(data.durationMs);
   } finally {
-    dateNow.mockRestore();
+    vi.useRealTimers();
   }
 });
 
@@ -743,6 +750,8 @@ test('prepare ios-runner rejects non-Apple runner devices', async () => {
     expect(response.error.code).toBe('UNSUPPORTED_OPERATION');
     expect(response.error.message).toBe('prepare is not supported on this device');
   }
+  expect(mockInspectDeviceRuntimeFacts).toHaveBeenCalledTimes(1);
+  expect(mockBindDeviceRuntime).not.toHaveBeenCalled();
   expect(mockPrepareIosRunner).not.toHaveBeenCalled();
 });
 

@@ -1,16 +1,8 @@
 import { isIosFamily, type DeviceInfo } from '@agent-device/kernel/device';
-import { detectSoleRunningIosSimulatorApp } from '../platforms/apple/core/app-resolution.ts';
-import type { IosAppInfo } from '../platforms/apple/core/app-info.ts';
-import {
-  listLocalDeviceInventory,
-  shouldPropagateDeviceInventoryProbeError,
-} from '../core/device-inventory-context.ts';
+import { resolveSoleForegroundIosApp } from '../platform-runtime-open-target.ts';
 import { shellQuoteIfNeeded } from '../utils/shell-quote.ts';
 
-export type ResolvedForegroundIosApp = {
-  device: DeviceInfo;
-  app: IosAppInfo;
-};
+export { resolveSoleForegroundIosApp } from '../platform-runtime-open-target.ts';
 
 /**
  * The shared ambiguity-detection probe: exactly one booted iOS simulator with
@@ -24,39 +16,14 @@ export type ResolvedForegroundIosApp = {
  * and treated as inconclusive. Cancellation and missing request-context
  * wiring are control-flow/composition failures and must propagate.
  *
- * `buildIosOpenCommandHint` (error-hint enrichment) and the bare
- * `open --foreground` auto-discovery form both compose this single probe
- * instead of re-deriving the ambiguity rules.
+ * `buildIosOpenCommandHint` is its only command-facing consumer; the actual bare
+ * `open --foreground` probe belongs to the admitted Apple lifecycle binding.
  */
-export async function resolveSoleForegroundIosApp(
-  options: { simulatorSetPath?: string } = {},
-): Promise<ResolvedForegroundIosApp | undefined> {
-  try {
-    const booted = await listLocalDeviceInventory({
-      platform: 'ios',
-      iosSimulatorSetPath: options.simulatorSetPath,
-      kind: 'simulator',
-      booted: true,
-    });
-    if (booted.length !== 1) return undefined;
-    const [soleBootedDevice] = booted;
-    if (!soleBootedDevice) return undefined;
-
-    const app = await detectSoleRunningIosSimulatorApp(soleBootedDevice);
-    if (!app) return undefined;
-
-    return { device: soleBootedDevice, app };
-  } catch (error) {
-    if (shouldPropagateDeviceInventoryProbeError(error)) throw error;
-    return undefined;
-  }
-}
-
 /**
  * Enriches the generic "Run open first" SESSION_NOT_FOUND hint with the exact
  * runnable command, but only when the environment is unambiguous (see
- * `resolveSoleForegroundIosApp`, which also owns the never-guess and
- * best-effort probe contract). Ambiguity or a genuine probe failure returns
+ * `resolveSoleForegroundIosApp`, which owns the never-guess and best-effort
+ * probe contract). Ambiguity or a genuine probe failure returns
  * `undefined` so the caller keeps the generic hint.
  */
 // Wire-level details are redacted before send (packages/kernel/src/redaction.ts),

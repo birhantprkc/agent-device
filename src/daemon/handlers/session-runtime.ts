@@ -1,13 +1,13 @@
 import type { CommandFlags } from '@agent-device/contracts/command';
+import {
+  hasRuntimeTransportHintValues,
+  type RuntimeHintValues,
+} from '@agent-device/contracts/platform';
 import { AppError, asAppError } from '@agent-device/kernel/errors';
 import { publicPlatformString, type DeviceInfo } from '@agent-device/kernel/device';
 import type { DaemonRequest, SessionRuntimeHints, SessionState } from '../types.ts';
 import { SessionStore } from '../session-store.ts';
-import {
-  clearRuntimeHintsFromApp,
-  hasRuntimeTransportHints,
-  trimRuntimeValue,
-} from '../runtime-hints.ts';
+import { trimRuntimeValue } from '../../utils/runtime-transport.ts';
 import { isAndroidEmulator, isIosSimulator } from '../device-targets.ts';
 import { errorResponse, type DaemonFailureResponse } from './response.ts';
 
@@ -29,6 +29,21 @@ export function countConfiguredRuntimeHints(runtime: SessionRuntimeHints | undef
   return [runtime.metroHost, runtime.metroPort, runtime.bundleUrl, runtime.launchUrl].filter(
     (value) => value !== undefined && value !== '',
   ).length;
+}
+
+/** Converts daemon-owned runtime policy into the neutral key/value runtime-facet contract. */
+export function runtimeHintValues(runtime: SessionRuntimeHints | undefined): RuntimeHintValues {
+  if (!runtime) return {};
+  const values: Record<string, string> = {};
+  if (runtime.metroHost !== undefined) values.metroHost = runtime.metroHost;
+  if (runtime.metroPort !== undefined) values.metroPort = String(runtime.metroPort);
+  if (runtime.bundleUrl !== undefined) values.bundleUrl = runtime.bundleUrl;
+  if (runtime.launchUrl !== undefined) values.launchUrl = runtime.launchUrl;
+  return values;
+}
+
+export function hasRuntimeTransportHints(runtime: SessionRuntimeHints | undefined): boolean {
+  return hasRuntimeTransportHintValues(runtimeHintValues(runtime));
 }
 
 function normalizeRuntimeStringInput(
@@ -281,18 +296,31 @@ export async function maybeClearRemovedRuntimeTransportHints(params: {
   previousRuntime: SessionRuntimeHints | undefined;
   runtime: SessionRuntimeHints | undefined;
   session: SessionState | undefined;
+  clearRuntimeHints(input: { appId?: string; values: RuntimeHintValues }): Promise<void>;
 }): Promise<void> {
-  const { replacedStoredRuntime, previousRuntime, runtime, session } = params;
-  if (
-    !replacedStoredRuntime ||
-    !session?.appBundleId ||
-    !hasRuntimeTransportHints(previousRuntime) ||
-    hasRuntimeTransportHints(runtime)
-  ) {
-    return;
-  }
-  await clearRuntimeHintsFromApp({
-    device: session.device,
+  const { previousRuntime, clearRuntimeHints } = params;
+  if (!shouldClearRemovedRuntimeTransportHints(params)) return;
+  const session = params.session;
+  if (!session?.appBundleId) return;
+  await clearRuntimeHints({
     appId: session.appBundleId,
+    values: runtimeHintValues(previousRuntime),
   });
+}
+
+/** Daemon session policy decides whether an open must remove its previous native transport. */
+export function shouldClearRemovedRuntimeTransportHints(
+  params: Readonly<{
+    replacedStoredRuntime: boolean;
+    previousRuntime: SessionRuntimeHints | undefined;
+    runtime: SessionRuntimeHints | undefined;
+    session: SessionState | undefined;
+  }>,
+): boolean {
+  return (
+    params.replacedStoredRuntime &&
+    Boolean(params.session?.appBundleId) &&
+    hasRuntimeTransportHints(params.previousRuntime) &&
+    !hasRuntimeTransportHints(params.runtime)
+  );
 }

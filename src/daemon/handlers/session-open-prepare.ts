@@ -1,27 +1,26 @@
 import { isDeepLinkTarget } from '@agent-device/contracts/command';
-import { ensureDeviceReady } from '../device-ready.ts';
+import {
+  openApplicationRuntimeUse,
+  type BoundDeviceRuntime,
+  type RuntimeHintsApplicationInput,
+} from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import type { DaemonRequest, DaemonResponse, SessionRuntimeHints, SessionState } from '../types.ts';
 import { SessionStore } from '../session-store.ts';
 import {
-  classifyAndroidAppTarget,
-  formatAndroidInstalledPackageRequiredMessage,
-} from '../../platforms/android/open-target.ts';
+  resolveRequestedOpenSurface,
+  validateOpenRelaunchTarget,
+} from '../../platform-runtime-open-target.ts';
 import {
+  hasRuntimeTransportHints,
   maybeClearRemovedRuntimeTransportHints,
+  shouldClearRemovedRuntimeTransportHints,
   tryResolveOpenRuntimeHints,
 } from './session-runtime.ts';
-import {
-  resolveAndroidPackageForOpen,
-  resolveSessionAppBundleIdForTarget,
-} from './session-open-target.ts';
 import { AppError } from '@agent-device/kernel/errors';
 import { errorResponse } from './response.ts';
-import {
-  resolveMacOsSurfaceAppState,
-  resolveRequestedOpenSurface,
-} from './session-open-surface.ts';
 import type { SessionSurface } from '@agent-device/contracts/session';
+import { resolveRunnerLogicalLeaseContext } from '../lease-context.ts';
 
 type OpenCommandDetails = {
   appBundleId?: string;
@@ -32,6 +31,21 @@ type OpenCommandDetails = {
 export type PreparedOpenCommandDetailsResult =
   | { type: 'response'; response: DaemonResponse }
   | { type: 'details'; details: OpenCommandDetails };
+
+type OpenApplicationRuntime = BoundDeviceRuntime<typeof openApplicationRuntimeUse>;
+type ClearRuntimeHints = (input: RuntimeHintsApplicationInput) => Promise<void>;
+
+export type ResolvedOpenRuntimeHintPlan = Readonly<{
+  runtime: SessionRuntimeHints | undefined;
+  previousRuntime: SessionRuntimeHints | undefined;
+  replacedStoredRuntime: boolean;
+  applyRuntimeHints: boolean;
+  clearRemovedRuntimeHints: boolean;
+}>;
+
+export type OpenRuntimeHintPlanResult =
+  | Readonly<{ type: 'response'; response: DaemonResponse }>
+  | Readonly<{ type: 'plan'; plan: ResolvedOpenRuntimeHintPlan }>;
 
 export function invalidOpenArgs(message: string): DaemonResponse {
   return errorResponse('INVALID_ARGS', message);
@@ -58,98 +72,129 @@ export function resolveOpenSurfaceResponse(
   }
 }
 
-export function validateResolvedOpenRequest(params: {
+export async function validateResolvedOpenRequest(params: {
   shouldRelaunch: boolean;
   openTarget: string | undefined;
   surface: SessionSurface;
   device: DeviceInfo;
-}): DaemonResponse | null {
+}): Promise<DaemonResponse | null> {
   const { shouldRelaunch, openTarget, surface, device } = params;
   if (!shouldRelaunch) return null;
-  if (openTarget && isDeepLinkTarget(openTarget)) {
-    return invalidOpenArgs('open --relaunch does not support URL targets.');
-  }
-  if (surface !== 'app') {
-    return invalidOpenArgs('open --relaunch is supported only for app surfaces.');
-  }
-  if (
-    device.platform === 'android' &&
-    openTarget &&
-    classifyAndroidAppTarget(openTarget) === 'binary'
-  ) {
-    return invalidOpenArgs(formatAndroidInstalledPackageRequiredMessage(openTarget));
-  }
-  return null;
+  const message = await validateOpenRelaunchTarget({
+    target: openTarget,
+    platform: device.platform,
+    surface,
+  });
+  return message ? invalidOpenArgs(message) : null;
 }
 
-export function validatePreResolvedOpenRequest(params: {
+export async function validatePreResolvedOpenRequest(params: {
   shouldRelaunch: boolean;
   openTarget: string | undefined;
   platform: DeviceInfo['platform'] | undefined;
-}): DaemonResponse | null {
+}): Promise<DaemonResponse | null> {
   const { shouldRelaunch, openTarget, platform } = params;
   if (!shouldRelaunch) return null;
-  if (openTarget && isDeepLinkTarget(openTarget)) {
-    return invalidOpenArgs('open --relaunch does not support URL targets.');
-  }
-  if (platform === 'android' && openTarget && classifyAndroidAppTarget(openTarget) === 'binary') {
-    return invalidOpenArgs(formatAndroidInstalledPackageRequiredMessage(openTarget));
-  }
-  return null;
+  const message = await validateOpenRelaunchTarget({ target: openTarget, platform });
+  return message ? invalidOpenArgs(message) : null;
 }
 
-export type IosSimulatorColdBootStartHandler = (device: DeviceInfo) => void;
+/**
+ * Resolves daemon-owned runtime-hint policy before facts admission. It performs only request and
+ * session-state reads so the selected lifecycle use can require exactly the native operations
+ * this open will invoke.
+ */
+export function resolveOpenRuntimeHintPlan(params: {
+  req: DaemonRequest;
+  sessionStore: SessionStore;
+  sessionName: string;
+  device: DeviceInfo;
+  existingSession?: SessionState;
+}): OpenRuntimeHintPlanResult {
+  const runtimeResult = tryResolveOpenRuntimeHints(params);
+  if (!runtimeResult.ok) return { type: 'response', response: runtimeResult };
+  const { runtime, previousRuntime, replacedStoredRuntime } = runtimeResult.data;
+  return {
+    type: 'plan',
+    plan: {
+      runtime,
+      previousRuntime,
+      replacedStoredRuntime,
+      applyRuntimeHints: hasRuntimeTransportHints(runtime),
+      clearRemovedRuntimeHints: shouldClearRemovedRuntimeTransportHints({
+        replacedStoredRuntime,
+        previousRuntime,
+        runtime,
+        session: params.existingSession,
+      }),
+    },
+  };
+}
 
 export async function prepareOpenCommandDetails(params: {
   req: DaemonRequest;
-  sessionName: string;
-  sessionStore: SessionStore;
-  device: DeviceInfo;
+  logPath: string;
   surface: SessionSurface;
   openTarget: string | undefined;
   existingSession?: SessionState;
-  onIosSimulatorColdBootStart?: IosSimulatorColdBootStartHandler;
+  runtime: OpenApplicationRuntime;
+  runtimeHintPlan: ResolvedOpenRuntimeHintPlan;
+  clearRuntimeHints?: ClearRuntimeHints;
+  foreground: boolean;
 }): Promise<PreparedOpenCommandDetailsResult> {
   const {
     req,
-    sessionName,
-    sessionStore,
-    device,
+    logPath,
     surface,
     openTarget,
     existingSession,
-    onIosSimulatorColdBootStart,
+    runtime,
+    runtimeHintPlan,
+    clearRuntimeHints,
+    foreground,
   } = params;
-  await ensureDeviceReady(device, {
+  await runtime.operations.prepareApplicationOpen({
+    target: openTarget,
+    currentAppBundleId: existingSession?.appBundleId,
+    hasExistingSession: existingSession !== undefined,
+    surface,
     deviceHub: req.flags?.deviceHub === true,
-    onIosSimulatorColdBootStart,
+    prewarmRunnerOnColdBoot:
+      surface === 'app' && Boolean(openTarget) && !isDeepLinkTarget(openTarget ?? ''),
+    execution: {
+      requestId: req.meta?.requestId,
+      logPath,
+      traceLogPath: existingSession?.trace?.outPath,
+      verbose: req.flags?.verbose,
+      iosXctestrunFile: req.flags?.iosXctestrunFile,
+      iosXctestDerivedDataPath: req.flags?.iosXctestDerivedDataPath,
+      iosXctestEnvDir: req.flags?.iosXctestEnvDir,
+      runnerLeaseContext: resolveRunnerLogicalLeaseContext(req),
+    },
   });
   const { appBundleId, appName } = await resolvePreparedOpenIdentity({
-    device,
+    runtime,
     surface,
     openTarget,
     existingAppBundleId: existingSession?.appBundleId,
+    foreground,
   });
-  const runtimeResult = tryResolveOpenRuntimeHints({
-    req,
-    sessionStore,
-    sessionName,
-    device,
-  });
-  if (!runtimeResult.ok) {
-    return {
-      type: 'response',
-      response: runtimeResult,
-    };
-  }
-
-  if (existingSession) {
-    const { runtime, previousRuntime, replacedStoredRuntime } = runtimeResult.data;
+  if (runtimeHintPlan.clearRemovedRuntimeHints) {
+    if (!clearRuntimeHints) {
+      throw new AppError(
+        'COMMAND_FAILED',
+        'Runtime hint clear operation was not admitted for this open.',
+        {
+          reason: 'runtime-hints-operation-missing',
+        },
+      );
+    }
     await maybeClearRemovedRuntimeTransportHints({
-      replacedStoredRuntime,
-      previousRuntime,
-      runtime,
+      replacedStoredRuntime: runtimeHintPlan.replacedStoredRuntime,
+      previousRuntime: runtimeHintPlan.previousRuntime,
+      runtime: runtimeHintPlan.runtime,
       session: existingSession,
+      clearRuntimeHints,
     });
   }
 
@@ -158,28 +203,27 @@ export async function prepareOpenCommandDetails(params: {
     details: {
       appBundleId,
       appName,
-      runtime: runtimeResult.data.runtime,
+      runtime: runtimeHintPlan.runtime,
     },
   };
 }
 
 async function resolvePreparedOpenIdentity(params: {
-  device: DeviceInfo;
+  runtime: OpenApplicationRuntime;
   surface: SessionSurface;
   openTarget: string | undefined;
   existingAppBundleId?: string;
+  foreground: boolean;
 }): Promise<{ appBundleId?: string; appName?: string }> {
-  const { device, surface, openTarget, existingAppBundleId } = params;
-  const macOsSurfaceState = await resolveMacOsSurfaceAppState(surface);
+  const { runtime, surface, openTarget, existingAppBundleId, foreground } = params;
+  const resolved = await runtime.operations.resolveOpenTarget({
+    target: openTarget,
+    currentAppBundleId: existingAppBundleId,
+    surface,
+    foreground,
+  });
   return {
-    appBundleId:
-      macOsSurfaceState.appBundleId ??
-      (await resolveSessionAppBundleIdForTarget(
-        device,
-        openTarget,
-        existingAppBundleId,
-        resolveAndroidPackageForOpen,
-      )),
-    appName: macOsSurfaceState.appName ?? openTarget,
+    appBundleId: resolved.appBundleId,
+    appName: resolved.appName,
   };
 }

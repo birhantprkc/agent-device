@@ -54,12 +54,17 @@ export function duplicateRuleIds(declarations: readonly RuleDeclaration[]): stri
 }
 
 /**
- * Empty, which is the end state: the R11 and R13 collisions this list was opened
- * for are gone (contracts-implementation-authority moved to R18, device-inventory-cutover
- * to R17), so their allowances expired and were deleted with them. Every id now names
- * exactly one rule, and an entry here would admit a collision nobody is fixing.
+ * Collisions that predate this gate. Transitional, and each entry expires on
+ * contact — see `ruleIdCollisionFailures`. Empty is the end state, and the gate
+ * gets there on its own.
+ *
+ * The R13 half is gone: the device-inventory cutover became a row in the
+ * parametrized runtime-command-cutover table and carries R17 there, so R13 now
+ * names `platform-package-substrate` alone. R11 waits on #1750's R18 rename.
  */
-export const KNOWN_RULE_ID_COLLISIONS: readonly string[] = [];
+export const KNOWN_RULE_ID_COLLISIONS: readonly string[] = [
+  'R11 names contracts-implementation-authority and package-boundaries',
+];
 
 /**
  * Both halves of the transition, because an allowance that outlives the thing

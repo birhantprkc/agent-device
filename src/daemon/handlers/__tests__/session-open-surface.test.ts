@@ -1,11 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
 import { AppError } from '@agent-device/kernel/errors';
-import {
-  buildNextOpenSession,
-  buildOpenResult,
-  resolveRequestedOpenSurface,
-} from '../session-open-surface.ts';
+import { buildNextOpenSession, buildOpenResult } from '../session-open-surface.ts';
+import { resolveRequestedOpenSurface } from '../../../platform-runtime-open-target.ts';
 import {
   authoringPublication,
   makeIosSession,

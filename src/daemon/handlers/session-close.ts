@@ -1,10 +1,6 @@
 import { emitDiagnostic } from '../../utils/diagnostics.ts';
 import { AppError, normalizeError } from '@agent-device/kernel/errors';
-import { scheduleIosRunnerIdleStop } from '../../platforms/apple/core/runner/runner-client.ts';
-import { isApplePlatform, type DeviceInfo } from '@agent-device/kernel/device';
-import { isActiveProviderDevice } from '../../provider-device-runtime.ts';
-import { dispatchCommand } from '../../core/dispatch.ts';
-import { contextFromFlags } from '../context.ts';
+import type { LeaseLifecycleProvider, TargetShutdownResult } from '@agent-device/contracts/device';
 import type { DaemonRequest, DaemonResponse, SessionState } from '../types.ts';
 import { SessionStore } from '../session-store.ts';
 import { clearRuntimeHintsFromApp, hasRuntimeTransportHints } from '../runtime-hints.ts';
@@ -12,12 +8,7 @@ import { cleanupRetainedMaterializedPathsForSession } from '../materialized-path
 import { canShutdownSessionTarget, shutdownSessionTarget } from '../session-close-shutdown.ts';
 import type { LeaseLifecycleProvider, TargetShutdownResult } from '@agent-device/contracts/device';
 import { successText, withSuccessText } from '../../utils/success-text.ts';
-import {
-  IOS_SIMULATOR_POST_CLOSE_SETTLE_MS,
-  isIosSimulator,
-  resolveCommandDevice,
-  settleIosSimulator,
-} from './session-device-utils.ts';
+import { resolveCommandDevice } from './session-device-utils.ts';
 import { errorResponse } from './response.ts';
 import { expireRefFrame } from '../ref-frame.ts';
 import type { LeaseRegistry } from '../lease-registry.ts';
@@ -28,20 +19,12 @@ import {
   recordRepairPlatformClose,
 } from '../session-replay-transaction.ts';
 import { isAuthoringArmedSession } from '../session-script-publication-capability.ts';
-import {
-  reportSessionCleanupFailures,
-  finishSessionScreenRecording,
-  restoreSessionAndroidIme,
-  stopAppleRunnerForClose,
-  stopSessionAndroidNativePerfCapture,
-  stopSessionAndroidSnapshotHelper,
-  stopSessionAppLog,
-  stopSessionApplePerfCapture,
-  stopSessionAudioProbe,
-  type SessionCleanupFailure,
-} from '../session-teardown.ts';
+import { type SessionCleanupFailure } from '../session-teardown.ts';
 import { clearDeviceClaim } from '../device-claims.ts';
 import type { DeviceShutdownCloseCapability } from '@agent-device/contracts/platform';
+import { applicationLifecycleExecutionFromRequest } from '../application-lifecycle-execution.ts';
+import { hasRuntimeTransportHints } from './session-runtime.ts';
+import type { BindDeviceRuntime, InspectDeviceRuntimeFacts } from '../request-runtime-binding.ts';
 import {
   buildRetriableRepairCloseFailureResponse,
   commitRepairScriptBeforeClose,
@@ -74,6 +57,13 @@ function shouldRetainAppleRunnerAfterClose(req: DaemonRequest, session: SessionS
 function shouldStopAppleRunnerBeforeTargetedClose(session: SessionState): boolean {
   return isApplePlatform(session.device.platform) && !isIosSimulator(session.device);
 }
+import {
+  admitCloseRuntime,
+  type CloseRuntime,
+  type CloseRuntimeWithRuntimeHintClear,
+  type RuntimeHintClearOperation,
+} from './session-close-runtime-admission.ts';
+import { closeCleanupError, runSessionCloseTeardown } from './session-close-lifecycle-teardown.ts';
 
 function toRepairPlatformCloseFailure(error: unknown): AppError {
   if (error instanceof AppError) return error;
@@ -81,75 +71,6 @@ function toRepairPlatformCloseFailure(error: unknown): AppError {
   return new AppError('COMMAND_FAILED', `The platform close failed: ${detail}`, {
     hint: 'The repair transaction was not committed because the platform close failed; fix the underlying issue and retry close --save-script.',
   });
-}
-
-type SessionCloseTeardownResult = {
-  platformCloseError: unknown;
-  saveScriptError?: AppError;
-};
-
-async function runSessionCloseTeardown(params: {
-  req: DaemonRequest;
-  session: SessionState;
-  sessionName: string;
-  logPath: string;
-  sessionStore: SessionStore;
-  cleanupFailures: SessionCleanupFailure[];
-  repairArmed: boolean;
-}): Promise<SessionCloseTeardownResult> {
-  const { req, session, sessionName, logPath, sessionStore, cleanupFailures, repairArmed } = params;
-  const attemptCleanup = async (step: string, run: () => Promise<void>): Promise<void> => {
-    try {
-      await run();
-    } catch (error) {
-      cleanupFailures.push({ step, error });
-    }
-  };
-  const retainAppleRunner = shouldRetainAppleRunnerAfterClose(req, session);
-  await stopBestEffortSessionResources(session, sessionName, sessionStore, attemptCleanup);
-  const platformCloseError = repairArmed
-    ? undefined
-    : await dispatchTargetedPlatformClose({ req, session, logPath });
-  await stopOrRetainAppleRunnerAfterClose(retainAppleRunner, session, attemptCleanup);
-  await clearSessionRuntimeHints(session, sessionStore, sessionName);
-  const saveScriptError = repairArmed
-    ? undefined
-    : finalizeOrdinaryCloseScript({ req, session, sessionStore, platformCloseError });
-  await attemptCleanup('materialized_paths', () =>
-    cleanupRetainedMaterializedPathsForSession(sessionName),
-  );
-  return { platformCloseError, saveScriptError };
-}
-
-type CleanupRunner = (step: string, run: () => Promise<void>) => Promise<void>;
-
-async function stopBestEffortSessionResources(
-  session: SessionState,
-  sessionName: string,
-  sessionStore: SessionStore,
-  attemptCleanup: CleanupRunner,
-): Promise<void> {
-  // Recording overlay finalization needs the Apple runner.
-  const currentSession = sessionStore.get(sessionName) ?? session;
-  if (currentSession.screenRecording) {
-    await attemptCleanup('recording', () =>
-      finishSessionScreenRecording({
-        session: currentSession,
-        sessionName,
-        sessionStore,
-      }),
-    );
-  }
-  await attemptCleanup('app_log', () => stopSessionAppLog({ session, sessionName, sessionStore }));
-  await attemptCleanup('audio_probe', async () => {
-    await stopSessionAudioProbe(session, 'session-close');
-  });
-  await attemptCleanup('apple_perf', () => stopSessionApplePerfCapture(session));
-  await attemptCleanup('android_native_perf', () => stopSessionAndroidNativePerfCapture(session));
-  await attemptCleanup('android_snapshot_helper', () => stopSessionAndroidSnapshotHelper(session));
-  await attemptCleanup('android_ime', () =>
-    restoreSessionAndroidIme(session, sessionStore.resolveDaemonStateDir()),
-  );
 }
 
 function buildRepairPlatformCloseReceipt(req: DaemonRequest): string {
@@ -165,12 +86,18 @@ async function prepareRepairClose(params: {
   session: SessionState;
   logPath: string;
   sessionStore: SessionStore;
+  lifecycle: CloseRuntime | CloseRuntimeWithRuntimeHintClear;
 }): Promise<RepairClosePreparation> {
-  const { req, session, logPath, sessionStore } = params;
+  const { req, session, logPath, sessionStore, lifecycle } = params;
   const repairArmed = isRepairArmedSession(session);
   const closeReceipt = buildRepairPlatformCloseReceipt(req);
   if (repairArmed && !hasRepairPlatformCloseReceipt(session, closeReceipt)) {
-    const platformCloseError = await dispatchTargetedPlatformClose({ req, session, logPath });
+    const platformCloseError = await dispatchTargetedPlatformClose({
+      req,
+      session,
+      logPath,
+      lifecycle,
+    });
     if (platformCloseError) {
       // Platform-close failure leaves the transaction state unchanged: no receipt is recorded,
       // so the retry dispatches afresh.
@@ -227,71 +154,22 @@ async function dispatchTargetedPlatformClose(params: {
   req: DaemonRequest;
   session: SessionState;
   logPath: string;
+  lifecycle: CloseRuntime | CloseRuntimeWithRuntimeHintClear;
 }): Promise<unknown> {
-  const { req, session, logPath } = params;
+  const { req, session, logPath, lifecycle } = params;
   if (!shouldDispatchPlatformClose(req, session)) return undefined;
-  if (shouldStopAppleRunnerBeforeTargetedClose(session)) {
-    // Non-simulator Apple targets must stop the runner before the platform close
-    // is dispatched (the runner owns the device connection). This is a required
-    // dependency, not best-effort cleanup: if it fails, skip the close dispatch
-    // and preserve the original failure. Later independent cleanup still runs.
-    try {
-      await stopAppleRunnerForClose(session);
-    } catch (error) {
-      return error;
-    }
-  }
   try {
-    // ADR 0014 side-effect seam: close mutates the device. The frame expires
-    // here for uniformity, though a successful close deletes the whole session
-    // (and its frame) in handleCloseCommand's finally, so nothing is restored.
-    expireRefFrame(session);
-    await dispatchCommand(session.device, 'close', req.positionals ?? [], req.flags?.out, {
-      ...contextFromFlags(logPath, req.flags, session.appBundleId, session.trace?.outPath),
+    await lifecycle.operations.closeApplication({
+      positionals: req.positionals ?? [],
+      outPath: req.flags?.out,
+      appBundleId: session.appBundleId,
+      surface: session.surface ?? 'app',
+      execution: applicationLifecycleExecutionFromRequest(req, logPath, session.trace?.outPath),
     });
-    await settleIosSimulator(session.device, IOS_SIMULATOR_POST_CLOSE_SETTLE_MS);
     return undefined;
   } catch (error) {
     return error;
   }
-}
-
-async function clearSessionRuntimeHints(
-  session: SessionState,
-  sessionStore: SessionStore,
-  sessionName: string,
-): Promise<void> {
-  const runtime = sessionStore.getRuntimeHints(sessionName);
-  if (!hasRuntimeTransportHints(runtime) || !session.appBundleId) return;
-  await clearRuntimeHintsFromApp({
-    device: session.device,
-    appId: session.appBundleId,
-  }).catch(() => {});
-}
-
-async function stopOrRetainAppleRunnerAfterClose(
-  retainAppleRunner: boolean,
-  session: SessionState,
-  attemptCleanup: CleanupRunner,
-): Promise<void> {
-  if (!isApplePlatform(session.device.platform)) return;
-  if (!retainAppleRunner) {
-    // The targeted close path stops before dispatch to avoid runner/app races.
-    // Stop again here for idempotent cleanup, and keep cleanup-sensitive closes explicit.
-    await attemptCleanup('apple_runner', () => stopAppleRunnerForClose(session));
-    return;
-  }
-  emitDiagnostic({
-    level: 'debug',
-    phase: 'ios_runner_retained_after_close',
-    data: {
-      session: session.name,
-      deviceId: session.device.id,
-    },
-  });
-  // A retained runner holds the device's runner lease against every other
-  // daemon; bound that with an idle stop unless something reuses it first.
-  scheduleIosRunnerIdleStop(session.device.id);
 }
 
 // Live evidence (2026-08-02): a plain `open` followed by `close --save-script` used to fold into
@@ -334,6 +212,8 @@ export async function handleCloseCommand(params: {
   leaseRegistry: LeaseRegistry;
   leaseLifecycleProvider?: LeaseLifecycleProvider;
   getCloseShutdown?: () => Promise<DeviceShutdownCloseCapability>;
+  inspectFacts?: InspectDeviceRuntimeFacts;
+  bindDevice?: BindDeviceRuntime;
 }): Promise<DaemonResponse> {
   const {
     req,
@@ -346,13 +226,45 @@ export async function handleCloseCommand(params: {
   } = params;
   const session = sessionStore.get(sessionName);
   if (!session) {
-    return await closeWithoutSession(req, logPath);
+    return await closeWithoutSession({
+      req,
+      logPath,
+      inspectFacts: params.inspectFacts,
+      bindDevice: params.bindDevice,
+    });
   }
   assertTerminalRecordingCloseAllowed(req, session);
-  if (req.internal?.closeAppOnly === true) {
-    return await closeAppWithoutEndingSession({ req, session, logPath });
+  if (req.internal?.closeAppOnly === true && !req.positionals?.[0]) {
+    return errorResponse('INVALID_ARGS', 'App-only close requires an app target');
   }
-  const repair = await prepareRepairClose({ req, session, logPath, sessionStore });
+  const admission = await admitCloseRuntime({
+    device: session.device,
+    clearRuntimeHints:
+      req.internal?.closeAppOnly !== true &&
+      Boolean(session.appBundleId) &&
+      hasRuntimeTransportHints(sessionStore.getRuntimeHints(sessionName)),
+    inspectFacts: params.inspectFacts,
+    bindDevice: params.bindDevice,
+  });
+  if (admission.type === 'response') return admission.response;
+  // Teardown can restore durable IME state, terminate an app, or shut down a target. All are
+  // mutating leaves, so invalidate the frame before the first teardown phase, not after dispatch.
+  expireRefFrame(session);
+  if (req.internal?.closeAppOnly === true) {
+    return await closeAppWithoutEndingSession({
+      req,
+      session,
+      logPath,
+      lifecycle: admission.runtime,
+    });
+  }
+  const repair = await prepareRepairClose({
+    req,
+    session,
+    logPath,
+    sessionStore,
+    lifecycle: admission.runtime,
+  });
   if ('response' in repair) return repair.response;
   const closed = await runCloseTeardownAndRelease({
     req,
@@ -362,6 +274,8 @@ export async function handleCloseCommand(params: {
     sessionStore,
     leaseRegistry,
     leaseLifecycleProvider,
+    lifecycle: admission.runtime,
+    clearRuntimeHints: admission.clearRuntimeHints,
     repairArmed: repair.repairArmed,
   });
   if (closed.kind === 'response') return closed.response;
@@ -374,14 +288,18 @@ export async function handleCloseCommand(params: {
     session,
     repair,
     requestedSaveScript: Boolean(req.flags?.saveScript),
-    shutdownResult,
+    shutdownResult: closed.shutdownResult,
     providerData: closed.providerData,
   });
 }
 
 type SessionCloseFinalization =
   | { kind: 'response'; response: DaemonResponse }
-  | { kind: 'closed'; providerData?: Record<string, unknown> };
+  | {
+      kind: 'closed';
+      providerData?: Record<string, unknown>;
+      shutdownResult?: TargetShutdownResult;
+    };
 
 // Everything between a settled repair decision and a success response:
 // failure-isolated resource teardown, provider lease release, then (only
@@ -395,6 +313,8 @@ async function runCloseTeardownAndRelease(params: {
   sessionStore: SessionStore;
   leaseRegistry: LeaseRegistry;
   leaseLifecycleProvider: LeaseLifecycleProvider | undefined;
+  lifecycle: CloseRuntime | CloseRuntimeWithRuntimeHintClear;
+  clearRuntimeHints?: RuntimeHintClearOperation;
   repairArmed: boolean;
 }): Promise<SessionCloseFinalization> {
   const {
@@ -405,16 +325,22 @@ async function runCloseTeardownAndRelease(params: {
     sessionStore,
     leaseRegistry,
     leaseLifecycleProvider,
+    lifecycle,
+    clearRuntimeHints,
   } = params;
   const cleanupFailures: SessionCleanupFailure[] = [];
-  const { platformCloseError, saveScriptError } = await runSessionCloseTeardown({
+  const { platformCloseError, saveScriptError, shutdownResult } = await runSessionCloseTeardown({
     req,
     session,
     sessionName,
     logPath,
     sessionStore,
+    lifecycle,
+    clearRuntimeHints,
     cleanupFailures,
     repairArmed: params.repairArmed,
+    dispatchTargetedPlatformClose,
+    finalizeOrdinaryCloseScript,
   });
   const leaseRelease = await releaseProviderLeaseForClose({
     session,
@@ -422,11 +348,7 @@ async function runCloseTeardownAndRelease(params: {
     leaseLifecycleProvider,
   });
   if (leaseRelease.response) return { kind: 'response', response: leaseRelease.response };
-  const cleanupAggregate = reportSessionCleanupFailures({
-    sessionName,
-    phase: 'session_close_cleanup_failed',
-    failures: cleanupFailures,
-  });
+  const cleanupAggregate = closeCleanupError(sessionName, cleanupFailures);
   const deviceClaimBlockingError = platformCloseError ?? cleanupAggregate;
   if (deviceClaimBlockingError) {
     if (session.deviceClaim) {
@@ -445,7 +367,7 @@ async function runCloseTeardownAndRelease(params: {
   sessionStore.delete(sessionName);
   if (deviceClaimBlockingError) throw deviceClaimBlockingError;
   if (saveScriptError) throw saveScriptError;
-  return { kind: 'closed', providerData: leaseRelease.providerData };
+  return { kind: 'closed', providerData: leaseRelease.providerData, shutdownResult };
 }
 
 function buildCloseSuccessResponse(params: {
@@ -492,13 +414,19 @@ async function closeAppWithoutEndingSession(params: {
   req: DaemonRequest;
   session: SessionState;
   logPath: string;
+  lifecycle: CloseRuntime | CloseRuntimeWithRuntimeHintClear;
 }): Promise<DaemonResponse> {
-  const { req, session, logPath } = params;
+  const { req, session, logPath, lifecycle } = params;
   const app = req.positionals?.[0];
   if (!app) {
     return errorResponse('INVALID_ARGS', 'App-only close requires an app target');
   }
-  const platformCloseError = await dispatchTargetedPlatformClose({ req, session, logPath });
+  const platformCloseError = await dispatchTargetedPlatformClose({
+    req,
+    session,
+    logPath,
+    lifecycle,
+  });
   if (platformCloseError) throw platformCloseError;
   return {
     ok: true,
@@ -517,19 +445,35 @@ function hasCloseTarget(req: DaemonRequest): boolean {
   return (req.positionals?.length ?? 0) > 0;
 }
 
-async function closeWithoutSession(req: DaemonRequest, logPath: string): Promise<DaemonResponse> {
+async function closeWithoutSession(params: {
+  req: DaemonRequest;
+  logPath: string;
+  inspectFacts?: InspectDeviceRuntimeFacts;
+  bindDevice?: BindDeviceRuntime;
+}): Promise<DaemonResponse> {
+  const { req, logPath, inspectFacts, bindDevice } = params;
   if (!req.positionals || req.positionals.length === 0) {
     return errorResponse('SESSION_NOT_FOUND', 'No active session');
   }
   const device = await resolveCommandDevice({
     session: undefined,
     flags: req.flags,
+    ensureReady: false,
+  });
+  const admission = await admitCloseRuntime({
+    device,
+    clearRuntimeHints: false,
+    inspectFacts,
+    bindDevice,
+  });
+  if (admission.type === 'response') return admission.response;
+  await admission.runtime.operations.closeApplication({
+    positionals: req.positionals,
+    outPath: req.flags?.out,
+    surface: 'app',
     ensureReady: true,
+    execution: applicationLifecycleExecutionFromRequest(req, logPath),
   });
-  await dispatchCommand(device, 'close', req.positionals, req.flags?.out, {
-    ...contextFromFlags(logPath, req.flags),
-  });
-  await settleIosSimulator(device, IOS_SIMULATOR_POST_CLOSE_SETTLE_MS);
   return {
     ok: true,
     data: {

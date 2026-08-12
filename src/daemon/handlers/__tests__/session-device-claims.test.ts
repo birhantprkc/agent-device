@@ -9,16 +9,17 @@ vi.mock('../../../core/dispatch.ts', async (importOriginal) => {
   return { ...actual, dispatchCommand: vi.fn(), resolveTargetDevice: vi.fn() };
 });
 vi.mock('../../device-ready.ts', () => ({ ensureDeviceReady: vi.fn(async () => {}) }));
-vi.mock('../../runtime-hints.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../runtime-hints.ts')>();
-  return { ...actual, applyRuntimeHintsToApp: vi.fn(async () => {}) };
+vi.mock('../../../platform-runtime-runtime-hints.ts', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../platform-runtime-runtime-hints.ts')>();
+  return { ...actual, applyRuntimeHintValues: vi.fn(async () => {}) };
 });
-vi.mock('../session-open-target.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../session-open-target.ts')>();
+vi.mock('../../../platform-runtime-open-target.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../platform-runtime-open-target.ts')>();
   return { ...actual, resolveAndroidPackageForOpen: vi.fn() };
 });
 vi.mock('../../../platforms/android/ime-lifecycle.ts', () => ({
-  activateAndroidTestIme: vi.fn(async () => {}),
+  activateAndroidTestIme: vi.fn(async () => ({ activated: false })),
   restoreAndroidTestIme: vi.fn(async () => ({ restored: false, reason: 'no-record' })),
 }));
 vi.mock('../../../utils/host-process.ts', async (importOriginal) =>
@@ -27,26 +28,37 @@ vi.mock('../../../utils/host-process.ts', async (importOriginal) =>
   ),
 );
 
-import { dispatchCommand, resolveTargetDevice } from '../../../core/dispatch.ts';
+import { resolveTargetDevice } from '../../../core/dispatch.ts';
 import { ensureDeviceReady } from '../../device-ready.ts';
-import { applyRuntimeHintsToApp } from '../../runtime-hints.ts';
-import { resolveAndroidPackageForOpen } from '../session-open-target.ts';
+import { applyRuntimeHintValues } from '../../../platform-runtime-runtime-hints.ts';
+import { resolveAndroidPackageForOpen } from '../../../platform-runtime-open-target.ts';
 import { activateAndroidTestIme } from '../../../platforms/android/ime-lifecycle.ts';
+import {
+  discoverReadyAndroidEmulators,
+  dispatchApplicationLifecycleEffect,
+} from '../../__tests__/application-lifecycle-runtime-fixture.ts';
 import { clearRequestCanceled, markRequestCanceled } from '../../../request/cancel.ts';
 import { acquireDeviceClaim as acquireProductionDeviceClaim } from '../../device-claims.ts';
 import { inspectDeviceClaims } from '../../device-claim-inspection.ts';
 import { LeaseRegistry } from '../../lease-registry.ts';
 import { SessionStore } from '../../session-store.ts';
-import { handleCloseCommand } from '../session-close.ts';
+import { handleCloseCommand as handleProductionCloseCommand } from '../session-close.ts';
 import { handleOpenCommand as handleProductionOpenCommand } from '../session-open.ts';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { makeAuthoringSession } from '../../../__tests__/test-utils/session-factories.ts';
 import { AppError } from '@agent-device/kernel/errors';
+import {
+  bindProviderLifecycleRuntime,
+  bindLifecycleRuntime,
+  inspectProviderLifecycleRuntimeFacts,
+  inspectLifecycleRuntimeFacts,
+} from './application-lifecycle-runtime-harness.ts';
 
-const mockDispatch = vi.mocked(dispatchCommand);
+const mockDispatch = vi.mocked(dispatchApplicationLifecycleEffect);
+const mockDiscoverReadyAndroidEmulators = vi.mocked(discoverReadyAndroidEmulators);
 const mockResolveTargetDevice = vi.mocked(resolveTargetDevice);
 const mockEnsureDeviceReady = vi.mocked(ensureDeviceReady);
-const mockApplyRuntimeHints = vi.mocked(applyRuntimeHintsToApp);
+const mockApplyRuntimeHints = vi.mocked(applyRuntimeHintValues);
 const mockResolveAndroidPackage = vi.mocked(resolveAndroidPackageForOpen);
 const roots: string[] = [];
 const reconcileOrphanedDeviceClaim = async () => ({
@@ -57,7 +69,22 @@ const reconcileOrphanedDeviceClaim = async () => ({
 function handleOpenCommand(
   params: Omit<Parameters<typeof handleProductionOpenCommand>[0], 'reconcileOrphanedDeviceClaim'>,
 ) {
-  return handleProductionOpenCommand({ ...params, reconcileOrphanedDeviceClaim });
+  return handleProductionOpenCommand({
+    ...params,
+    inspectFacts: params.inspectFacts ?? inspectLifecycleRuntimeFacts,
+    bindDevice: params.bindDevice ?? bindLifecycleRuntime,
+    reconcileOrphanedDeviceClaim,
+  });
+}
+
+function handleCloseCommand(
+  params: Omit<Parameters<typeof handleProductionCloseCommand>[0], 'inspectFacts' | 'bindDevice'>,
+) {
+  return handleProductionCloseCommand({
+    ...params,
+    inspectFacts: inspectLifecycleRuntimeFacts,
+    bindDevice: bindLifecycleRuntime,
+  });
 }
 
 function acquireDeviceClaim(
@@ -93,8 +120,11 @@ const android: DeviceInfo = {
 
 test('failed local open before device setup rolls its device claim back', async () => {
   const { store, stateDir } = setup();
-  mockResolveTargetDevice.mockResolvedValue(android);
-  mockEnsureDeviceReady.mockRejectedValue(new Error('device not ready'));
+  // A stopped AVD, so preparation actually runs emulator discovery. Readiness is package-owned
+  // now, so this is where a pre-device-effect failure surfaces.
+  const stoppedAvd = { ...android, id: 'pixel-avd', booted: false };
+  mockResolveTargetDevice.mockResolvedValue(stoppedAvd);
+  mockDiscoverReadyAndroidEmulators.mockRejectedValue(new Error('device not ready'));
 
   await assert.rejects(async () =>
     handleOpenCommand({
@@ -110,7 +140,7 @@ test('failed local open before device setup rolls its device claim back', async 
       sessionStore: store,
     }),
   );
-  assert.deepEqual(inspectDeviceClaims({ serial: android.id }), []);
+  assert.deepEqual(inspectDeviceClaims({ serial: stoppedAvd.id }), []);
 });
 
 test('failed local open after dispatch retains its device claim for recovery', async () => {
@@ -189,7 +219,7 @@ test('cancellation after local device setup retains the device claim for recover
   const { store, stateDir } = setup();
   const requestId = 'claim-canceled-after-dispatch';
   mockResolveTargetDevice.mockResolvedValue(android);
-  mockDispatch.mockResolvedValue({});
+  mockDispatch.mockResolvedValue(undefined);
   markRequestCanceled(requestId);
 
   try {
@@ -217,10 +247,10 @@ test('cancellation after local device setup retains the device claim for recover
   }
 });
 
-test('remote open creates no host-local device claim', async () => {
+test('provider-owned open creates no host-local device claim from its selected owner', async () => {
   const { store, stateDir } = setup();
   mockResolveTargetDevice.mockResolvedValue(android);
-  mockDispatch.mockResolvedValue({});
+  mockDispatch.mockResolvedValue(undefined);
 
   const response = await handleOpenCommand({
     req: {
@@ -229,11 +259,15 @@ test('remote open creates no host-local device claim', async () => {
       session: 'remote-open',
       positionals: ['Demo'],
       flags: { platform: 'android' },
-      meta: { leaseProvider: 'proxy', deviceKey: 'android:emulator-5554' },
+      // Ambient request metadata is intentionally irrelevant. The admitted binding below is the
+      // sole owner authority and must not reach through to local ADB or claim bookkeeping.
+      meta: { leaseProvider: 'unrelated-ambient-provider', deviceKey: 'android:emulator-5554' },
     },
     sessionName: 'remote-open',
     logPath: path.join(stateDir, 'daemon.log'),
     sessionStore: store,
+    inspectFacts: inspectProviderLifecycleRuntimeFacts,
+    bindDevice: bindProviderLifecycleRuntime,
   });
   assert.equal(response.ok, true);
   assert.deepEqual(inspectDeviceClaims({ serial: android.id }), []);
@@ -306,7 +340,7 @@ test('local close clears its matching device claim after teardown', async () => 
     createdAt: Date.now(),
     actions: [],
   });
-  mockDispatch.mockResolvedValue({});
+  mockDispatch.mockResolvedValue(undefined);
 
   const response = await handleCloseCommand({
     req: { command: 'close', token: 'test', session: 'close-claim', positionals: [], flags: {} },
@@ -345,7 +379,7 @@ test('#1391: a close-time script save failure still clears the device claim and 
     },
   });
   store.set('close-save-script-failure', session);
-  mockDispatch.mockResolvedValue({});
+  mockDispatch.mockResolvedValue(undefined);
 
   // Like the platform-close-error tests above, a failed close-time save is
   // thrown (not returned as `{ok:false}`) — `handleCloseCommand` never

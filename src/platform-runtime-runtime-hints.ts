@@ -1,20 +1,9 @@
 import { isIosFamily, type DeviceInfo } from '@agent-device/kernel/device';
 import { AppError, asAppError } from '@agent-device/kernel/errors';
 import { escapeXmlTextAndAttribute } from '@agent-device/xml';
-import { execFailureDetails, type ExecResult } from '../utils/exec.ts';
-import type { SessionRuntimeHints } from './types.ts';
-import {
-  resolveRuntimeTransportHints,
-  type ResolvedRuntimeTransport,
-} from '../utils/runtime-transport.ts';
-import { runAndroidAdb } from '../platforms/android/adb.ts';
-import {
-  classifyAndroidAppTarget,
-  formatAndroidInstalledPackageRequiredMessage,
-} from '../platforms/android/open-target.ts';
-import { buildSimctlArgsForDevice } from '../platforms/apple/core/simctl.ts';
-import { runXcrun } from '../platforms/apple/core/tool-provider.ts';
-import { isActiveProviderDevice } from '../provider-device-runtime.ts';
+import type { RuntimeHintValues } from '@agent-device/contracts/platform';
+import { execFailureDetails, type ExecResult } from './utils/exec.ts';
+import { type ResolvedRuntimeTransport } from './utils/runtime-transport.ts';
 
 // React Native's PackagerConnectionSettings/DevInternalSettings read debug_http_host via
 // PreferenceManager.getDefaultSharedPreferences(context), which resolves to
@@ -39,21 +28,14 @@ const DEFAULT_ANDROID_PREFS_XML = [
   '',
 ].join('\n');
 
-export { trimRuntimeValue } from '../utils/runtime-transport.ts';
-
-export function hasRuntimeTransportHints(runtime: SessionRuntimeHints | undefined): boolean {
-  return resolveRuntimeTransportHints(runtime) !== undefined;
-}
-
-export async function applyRuntimeHintsToApp(params: {
+export async function applyRuntimeHintValues(params: {
   device: DeviceInfo;
   appId?: string;
-  runtime: SessionRuntimeHints | undefined;
+  values: RuntimeHintValues;
 }): Promise<void> {
-  const { device, appId, runtime } = params;
-  if (isActiveProviderDevice(device)) return;
+  const { device, appId, values } = params;
   if (!appId) return;
-  const transport = resolveRuntimeTransportHints(runtime);
+  const transport = resolveRuntimeTransportHintValues(values);
   if (!transport) return;
 
   if (device.platform === 'android') {
@@ -66,7 +48,7 @@ export async function applyRuntimeHintsToApp(params: {
   }
 }
 
-export async function clearRuntimeHintsFromApp(params: {
+export async function clearRuntimeHintValues(params: {
   device: DeviceInfo;
   appId?: string;
 }): Promise<void> {
@@ -83,6 +65,60 @@ export async function clearRuntimeHintsFromApp(params: {
   }
 }
 
+function resolveRuntimeTransportHintValues(
+  values: RuntimeHintValues,
+): ResolvedRuntimeTransport | undefined {
+  const bundleTransport = resolveBundleRuntimeTransport(runtimeHintValue(values, 'bundleUrl'));
+  const host = runtimeHintValue(values, 'metroHost') ?? bundleTransport?.host;
+  const port = runtimeHintPort(values, 'metroPort') ?? bundleTransport?.port;
+  const scheme = bundleTransport?.scheme ?? 'http';
+  return host && port ? { host, port, scheme } : undefined;
+}
+
+type RuntimeBundleTransport = Readonly<{
+  host?: string;
+  port?: number;
+  scheme: 'http' | 'https';
+}>;
+
+function resolveBundleRuntimeTransport(
+  bundleUrl: string | undefined,
+): RuntimeBundleTransport | undefined {
+  if (!bundleUrl) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(bundleUrl);
+  } catch (error) {
+    throw new AppError('INVALID_ARGS', `Invalid runtime bundle URL: ${bundleUrl}`, {}, error);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return undefined;
+  return {
+    host: normalizeRuntimeHintValue(parsed.hostname),
+    port: normalizeRuntimeHintPort(
+      parsed.port.length > 0 ? Number(parsed.port) : parsed.protocol === 'https:' ? 443 : 80,
+    ),
+    scheme: parsed.protocol === 'https:' ? 'https' : 'http',
+  };
+}
+
+function runtimeHintValue(values: RuntimeHintValues, key: string): string | undefined {
+  return normalizeRuntimeHintValue(values[key]);
+}
+
+function runtimeHintPort(values: RuntimeHintValues, key: string): number | undefined {
+  const value = runtimeHintValue(values, key);
+  return value === undefined ? undefined : normalizeRuntimeHintPort(Number(value));
+}
+
+function normalizeRuntimeHintValue(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeRuntimeHintPort(value: number): number | undefined {
+  return Number.isInteger(value) && value > 0 && value <= 65_535 ? value : undefined;
+}
+
 function androidDevPrefsPaths(packageName: string): string[] {
   return [`shared_prefs/${packageName}_preferences.xml`, ANDROID_LEGACY_DEV_PREFS_PATH];
 }
@@ -92,7 +128,7 @@ async function applyAndroidRuntimeHints(
   packageName: string,
   transport: ResolvedRuntimeTransport,
 ): Promise<void> {
-  assertAndroidRuntimePackageName(packageName);
+  await assertAndroidRuntimePackageName(packageName);
   const files: Array<{ path: string; xml: string }> = [];
   for (const prefsPath of androidDevPrefsPaths(packageName)) {
     const currentXml = await readAndroidDevPrefs(device, packageName, prefsPath);
@@ -108,7 +144,7 @@ async function applyAndroidRuntimeHints(
 }
 
 async function clearAndroidRuntimeHints(device: DeviceInfo, packageName: string): Promise<void> {
-  assertAndroidRuntimePackageName(packageName);
+  await assertAndroidRuntimePackageName(packageName);
   const files: Array<{ path: string; xml: string }> = [];
   for (const prefsPath of androidDevPrefsPaths(packageName)) {
     const currentXml = await readAndroidDevPrefs(device, packageName, prefsPath);
@@ -119,14 +155,27 @@ async function clearAndroidRuntimeHints(device: DeviceInfo, packageName: string)
   if (files.length === 0) return;
   await writeAndroidDevPrefs(device, packageName, files);
 }
+
+/** Android mechanics stay implementation-lazy until an admitted Android hint operation runs. */
+async function runRuntimeHintsAndroidAdb(
+  device: DeviceInfo,
+  args: string[],
+  options?: Readonly<{ allowFailure?: boolean; stdin?: string }>,
+): Promise<ExecResult> {
+  const { runAndroidAdb } = await import('./platforms/android/adb.ts');
+  return await runAndroidAdb(device, args, options);
+}
+
 async function readAndroidDevPrefs(
   device: DeviceInfo,
   packageName: string,
   prefsPath: string,
 ): Promise<string> {
-  const result = await runAndroidAdb(device, ['shell', 'run-as', packageName, 'cat', prefsPath], {
-    allowFailure: true,
-  });
+  const result = await runRuntimeHintsAndroidAdb(
+    device,
+    ['shell', 'run-as', packageName, 'cat', prefsPath],
+    { allowFailure: true },
+  );
   if (result.exitCode !== 0) return DEFAULT_ANDROID_PREFS_XML;
   return normalizeAndroidPrefsXml(result.stdout);
 }
@@ -149,7 +198,7 @@ async function assertAndroidAppSandboxAccessible(
   packageName: string,
 ): Promise<void> {
   const probeArgs = ['shell', 'run-as', packageName, 'id'];
-  const probeResult = await runAndroidAdb(device, probeArgs, { allowFailure: true });
+  const probeResult = await runRuntimeHintsAndroidAdb(device, probeArgs, { allowFailure: true });
   if (probeResult.exitCode === 0) return;
   throw androidRuntimeHintsProbeError(probeResult, packageName, probeArgs);
 }
@@ -179,9 +228,16 @@ async function writeAndroidDevPrefsFiles(
   packageName: string,
   files: Array<{ path: string; xml: string }>,
 ): Promise<void> {
-  await runAndroidAdb(device, ['shell', 'run-as', packageName, 'mkdir', '-p', 'shared_prefs']);
+  await runRuntimeHintsAndroidAdb(device, [
+    'shell',
+    'run-as',
+    packageName,
+    'mkdir',
+    '-p',
+    'shared_prefs',
+  ]);
   for (const file of files) {
-    await runAndroidAdb(device, ['shell', 'run-as', packageName, 'tee', file.path], {
+    await runRuntimeHintsAndroidAdb(device, ['shell', 'run-as', packageName, 'tee', file.path], {
       stdin: file.xml.trimEnd(),
     });
   }
@@ -214,55 +270,52 @@ async function applyIosSimulatorRuntimeHints(
   bundleId: string,
   transport: ResolvedRuntimeTransport,
 ): Promise<void> {
-  await runXcrun(
-    buildSimctlArgsForDevice(device, [
-      'spawn',
-      device.id,
-      'defaults',
-      'write',
-      bundleId,
-      IOS_JS_LOCATION_KEY,
-      '-string',
-      `${transport.host}:${transport.port}`,
-    ]),
-  );
-  await runXcrun(
-    buildSimctlArgsForDevice(device, [
-      'spawn',
-      device.id,
-      'defaults',
-      'write',
-      bundleId,
-      IOS_PACKAGER_SCHEME_KEY,
-      '-string',
-      transport.scheme,
-    ]),
-  );
+  await runIosSimulatorRuntimeHintCommand(device, [
+    'spawn',
+    device.id,
+    'defaults',
+    'write',
+    bundleId,
+    IOS_JS_LOCATION_KEY,
+    '-string',
+    `${transport.host}:${transport.port}`,
+  ]);
+  await runIosSimulatorRuntimeHintCommand(device, [
+    'spawn',
+    device.id,
+    'defaults',
+    'write',
+    bundleId,
+    IOS_PACKAGER_SCHEME_KEY,
+    '-string',
+    transport.scheme,
+  ]);
 }
 
 async function clearIosSimulatorRuntimeHints(device: DeviceInfo, bundleId: string): Promise<void> {
-  await runXcrun(
-    buildSimctlArgsForDevice(device, [
-      'spawn',
-      device.id,
-      'defaults',
-      'delete',
-      bundleId,
-      IOS_JS_LOCATION_KEY,
-    ]),
+  await runIosSimulatorRuntimeHintCommand(
+    device,
+    ['spawn', device.id, 'defaults', 'delete', bundleId, IOS_JS_LOCATION_KEY],
     { allowFailure: true },
   );
-  await runXcrun(
-    buildSimctlArgsForDevice(device, [
-      'spawn',
-      device.id,
-      'defaults',
-      'delete',
-      bundleId,
-      IOS_PACKAGER_SCHEME_KEY,
-    ]),
+  await runIosSimulatorRuntimeHintCommand(
+    device,
+    ['spawn', device.id, 'defaults', 'delete', bundleId, IOS_PACKAGER_SCHEME_KEY],
     { allowFailure: true },
   );
+}
+
+/** Apple mechanics stay implementation-lazy until an admitted simulator hint operation runs. */
+async function runIosSimulatorRuntimeHintCommand(
+  device: DeviceInfo,
+  args: string[],
+  options?: Readonly<{ allowFailure?: boolean }>,
+): Promise<void> {
+  const [{ buildSimctlArgsForDevice }, { runXcrun }] = await Promise.all([
+    import('./platforms/apple/core/simctl.ts'),
+    import('./platforms/apple/core/tool-provider.ts'),
+  ]);
+  await runXcrun(buildSimctlArgsForDevice(device, args), options);
 }
 
 function normalizeAndroidPrefsXml(xml: string): string {
@@ -298,7 +351,9 @@ function removeAndroidPrefEntry(xml: string, key: string): string {
     );
 }
 
-function assertAndroidRuntimePackageName(packageName: string): void {
+async function assertAndroidRuntimePackageName(packageName: string): Promise<void> {
+  const { classifyAndroidAppTarget, formatAndroidInstalledPackageRequiredMessage } =
+    await import('./platforms/android/open-target.ts');
   if (classifyAndroidAppTarget(packageName) !== 'binary') return;
   const message = formatAndroidInstalledPackageRequiredMessage(packageName);
   throw new AppError('INVALID_ARGS', message, {

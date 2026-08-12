@@ -8,10 +8,12 @@ import type {
   ProviderDeviceRuntime,
 } from '@agent-device/contracts/device';
 import type { Interactor, SnapshotResult } from '@agent-device/contracts/interaction';
+import { providerRuntimeOwner } from '@agent-device/contracts/platform';
 import type { DaemonRequest } from '../../../src/daemon/types.ts';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { assertRpcOk } from './assertions.ts';
 import { createProviderScenarioHarness, withProviderScenarioResource } from './harness.ts';
+import { createProviderScenarioLifecycleModule } from './provider-device-runtime.fixtures.ts';
 
 const PROVIDER = 'fake-ios-provider';
 const DEVICE: DeviceInfo = {
@@ -96,9 +98,17 @@ async function createProviderIosSelectorWorld() {
   };
   const runtime = createProviderRuntime(calls);
   const providers = createProviderDeviceRuntimeRequestProviders([runtime]);
+  const providerModule = createProviderScenarioLifecycleModule(
+    runtime,
+    providerRuntimeOwner(PROVIDER, 'ios-selector-runtime'),
+  );
   const daemon = await createProviderScenarioHarness({
     ...providers,
     deviceInventorySource: providers.deviceInventorySource!,
+    platformRuntime: {
+      providerRuntimes: [runtime],
+      providerModules: [{ runtime, module: providerModule }],
+    },
   });
   return {
     daemon,

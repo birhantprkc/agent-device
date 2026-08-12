@@ -3,11 +3,17 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { AppError } from '@agent-device/kernel/errors';
-import { applyRuntimeHintsToApp, clearRuntimeHintsFromApp } from '../runtime-hints.ts';
-import { applyDeviceDefaultMetroHost } from '../handlers/session-runtime.ts';
-import { resolveRuntimeTransportHints } from '../../utils/runtime-transport.ts';
+import {
+  applyRuntimeHintValues,
+  clearRuntimeHintValues,
+} from '../platform-runtime-runtime-hints.ts';
+import {
+  applyDeviceDefaultMetroHost,
+  runtimeHintValues,
+} from '../daemon/handlers/session-runtime.ts';
+import { resolveRuntimeTransportHints } from '../utils/runtime-transport.ts';
 import type { DeviceInfo } from '@agent-device/kernel/device';
-import { mkdtempForTest } from '../../__tests__/test-utils/tmp-dir.ts';
+import { mkdtempForTest } from './test-utils/tmp-dir.ts';
 
 const LEGACY_PREFS_PATH = 'shared_prefs/ReactNativeDevPrefs.xml';
 
@@ -214,7 +220,7 @@ test('resolveRuntimeTransportHints derives host, port, and scheme from bundle UR
   );
 });
 
-test('applyRuntimeHintsToApp writes debug_http_host to the RN default-preferences file React Native actually reads', async () => {
+test('applyRuntimeHintValues writes debug_http_host to the RN default-preferences file React Native actually reads', async () => {
   await withMockedAdb(async ({ device, argsLogPath, seedPrefsFile, readWrittenPrefsFile }) => {
     const packageName = 'com.example.demo';
     await seedPrefsFile(
@@ -228,11 +234,10 @@ test('applyRuntimeHintsToApp writes debug_http_host to the RN default-preference
       ].join('\n'),
     );
 
-    await applyRuntimeHintsToApp({
+    await applyRuntimeHintValues({
       device,
       appId: packageName,
-      runtime: {
-        platform: 'android',
+      values: {
         bundleUrl: 'https://10.0.0.10:8082/index.bundle?platform=android',
       },
     });
@@ -258,7 +263,7 @@ test('applyRuntimeHintsToApp writes debug_http_host to the RN default-preference
   });
 });
 
-test('applyRuntimeHintsToApp also writes the legacy ReactNativeDevPrefs.xml path for back-compat', async () => {
+test('applyRuntimeHintValues also writes the legacy ReactNativeDevPrefs.xml path for back-compat', async () => {
   await withMockedAdb(async ({ device, argsLogPath, seedPrefsFile, readWrittenPrefsFile }) => {
     const packageName = 'com.example.demo';
     await seedPrefsFile(
@@ -272,11 +277,10 @@ test('applyRuntimeHintsToApp also writes the legacy ReactNativeDevPrefs.xml path
       ].join('\n'),
     );
 
-    await applyRuntimeHintsToApp({
+    await applyRuntimeHintValues({
       device,
       appId: packageName,
-      runtime: {
-        platform: 'android',
+      values: {
         bundleUrl: 'https://10.0.0.10:8082/index.bundle?platform=android',
       },
     });
@@ -313,7 +317,11 @@ test('port-only hint on an Android emulator defaults host to 10.0.2.2 and writes
     const runtime = applyDeviceDefaultMetroHost({ platform: 'android', metroPort: 8084 }, device);
     assert.equal(runtime?.metroHost, '10.0.2.2');
 
-    await applyRuntimeHintsToApp({ device, appId: packageName, runtime });
+    await applyRuntimeHintValues({
+      device,
+      appId: packageName,
+      values: runtimeHintValues(runtime),
+    });
 
     const defaultPayload = await readWrittenPrefsFile(defaultPrefsPath(packageName));
     assert.ok(defaultPayload, 'expected a write to the default RN preferences file');
@@ -324,13 +332,12 @@ test('port-only hint on an Android emulator defaults host to 10.0.2.2 and writes
 test('Android runtime hints escape XML text and quoted attribute delimiters', async () => {
   await withMockedAdb(async ({ device, readWrittenPrefsFile }) => {
     const packageName = 'com.example.demo';
-    await applyRuntimeHintsToApp({
+    await applyRuntimeHintValues({
       device,
       appId: packageName,
-      runtime: {
-        platform: 'android',
+      values: {
         metroHost: `host&<>"'`,
-        metroPort: 8084,
+        metroPort: '8084',
       },
     });
 
@@ -352,7 +359,11 @@ test('port-only hint on a physical Android device stays ambiguous and writes not
     );
     assert.equal(runtime?.metroHost, undefined);
 
-    await applyRuntimeHintsToApp({ device: physicalDevice, appId: 'com.example.demo', runtime });
+    await applyRuntimeHintValues({
+      device: physicalDevice,
+      appId: 'com.example.demo',
+      values: runtimeHintValues(runtime),
+    });
 
     const loggedArgs = await fs.readFile(argsLogPath, 'utf8').catch(() => '');
     assert.doesNotMatch(loggedArgs, /tee/);
@@ -365,7 +376,11 @@ test('port-only hint on an iOS simulator defaults host to 127.0.0.1', async () =
     const runtime = applyDeviceDefaultMetroHost({ platform: 'ios', metroPort: 8084 }, device);
     assert.equal(runtime?.metroHost, '127.0.0.1');
 
-    await applyRuntimeHintsToApp({ device, appId: 'com.example.demo', runtime });
+    await applyRuntimeHintValues({
+      device,
+      appId: 'com.example.demo',
+      values: runtimeHintValues(runtime),
+    });
 
     const loggedArgs = await fs.readFile(argsLogPath, 'utf8');
     assert.match(
@@ -375,16 +390,15 @@ test('port-only hint on an iOS simulator defaults host to 127.0.0.1', async () =
   });
 });
 
-test('applyRuntimeHintsToApp rejects Android app binary paths before run-as', async () => {
+test('applyRuntimeHintValues rejects Android app binary paths before run-as', async () => {
   await withMockedAdb(async ({ device, argsLogPath }) => {
     await assert.rejects(
-      applyRuntimeHintsToApp({
+      applyRuntimeHintValues({
         device,
         appId: '/tmp/app-debug.apk',
-        runtime: {
-          platform: 'android',
+        values: {
           metroHost: '10.0.0.10',
-          metroPort: 8081,
+          metroPort: '8081',
         },
       }),
       (error: unknown) =>
@@ -399,16 +413,15 @@ test('applyRuntimeHintsToApp rejects Android app binary paths before run-as', as
   });
 });
 
-test('applyRuntimeHintsToApp rejects bare Android app binary filenames before run-as', async () => {
+test('applyRuntimeHintValues rejects bare Android app binary filenames before run-as', async () => {
   await withMockedAdb(async ({ device, argsLogPath }) => {
     await assert.rejects(
-      applyRuntimeHintsToApp({
+      applyRuntimeHintValues({
         device,
         appId: 'app-debug.apk',
-        runtime: {
-          platform: 'android',
+        values: {
           metroHost: '10.0.0.10',
-          metroPort: 8081,
+          metroPort: '8081',
         },
       }),
       (error: unknown) =>
@@ -423,20 +436,19 @@ test('applyRuntimeHintsToApp rejects bare Android app binary filenames before ru
   });
 });
 
-test('applyRuntimeHintsToApp distinguishes run-as denial from general write failures', async () => {
+test('applyRuntimeHintValues distinguishes run-as denial from general write failures', async () => {
   await withMockedAdb(async ({ device }) => {
     process.env.AGENT_DEVICE_TEST_RUN_AS_ID_EXIT_CODE = '1';
     process.env.AGENT_DEVICE_TEST_RUN_AS_ID_STDERR =
       'run-as: package not debuggable: com.example.demo';
     try {
       await assert.rejects(
-        applyRuntimeHintsToApp({
+        applyRuntimeHintValues({
           device,
           appId: 'com.example.demo',
-          runtime: {
-            platform: 'android',
+          values: {
             metroHost: '10.0.0.10',
-            metroPort: 8081,
+            metroPort: '8081',
           },
         }),
         (error: unknown) => {
@@ -458,19 +470,18 @@ test('applyRuntimeHintsToApp distinguishes run-as denial from general write fail
   });
 });
 
-test('applyRuntimeHintsToApp uses generic probe hint when probe fails without run-as denial output', async () => {
+test('applyRuntimeHintValues uses generic probe hint when probe fails without run-as denial output', async () => {
   await withMockedAdb(async ({ device }) => {
     process.env.AGENT_DEVICE_TEST_RUN_AS_ID_EXIT_CODE = '1';
     process.env.AGENT_DEVICE_TEST_RUN_AS_ID_STDERR = 'error: device not found';
     try {
       await assert.rejects(
-        applyRuntimeHintsToApp({
+        applyRuntimeHintValues({
           device,
           appId: 'com.example.demo',
-          runtime: {
-            platform: 'android',
+          values: {
             metroHost: '10.0.0.10',
-            metroPort: 8081,
+            metroPort: '8081',
           },
         }),
         (error: unknown) => {
@@ -492,20 +503,19 @@ test('applyRuntimeHintsToApp uses generic probe hint when probe fails without ru
   });
 });
 
-test('applyRuntimeHintsToApp preserves write failures after a successful run-as probe', async () => {
+test('applyRuntimeHintValues preserves write failures after a successful run-as probe', async () => {
   await withMockedAdb(async ({ device }) => {
     process.env.AGENT_DEVICE_TEST_RUN_AS_WRITE_EXIT_CODE = '1';
     process.env.AGENT_DEVICE_TEST_RUN_AS_WRITE_STDERR =
       "sh: can't create shared_prefs/com.example.demo_preferences.xml: Permission denied";
     try {
       await assert.rejects(
-        applyRuntimeHintsToApp({
+        applyRuntimeHintValues({
           device,
           appId: 'com.example.demo',
-          runtime: {
-            platform: 'android',
+          values: {
             metroHost: '10.0.0.10',
-            metroPort: 8081,
+            metroPort: '8081',
           },
         }),
         (error: unknown) => {
@@ -528,7 +538,7 @@ test('applyRuntimeHintsToApp preserves write failures after a successful run-as 
   });
 });
 
-test('clearRuntimeHintsFromApp removes managed Android runtime prefs from both files but preserves unrelated entries', async () => {
+test('clearRuntimeHintValues removes managed Android runtime prefs from both files but preserves unrelated entries', async () => {
   await withMockedAdb(async ({ device, seedPrefsFile, readWrittenPrefsFile }) => {
     const packageName = 'com.example.demo';
     const seeded = (keepKey: string, keepValue: string): string =>
@@ -544,7 +554,7 @@ test('clearRuntimeHintsFromApp removes managed Android runtime prefs from both f
     await seedPrefsFile(defaultPrefsPath(packageName), seeded('keep_default', 'default-value'));
     await seedPrefsFile(LEGACY_PREFS_PATH, seeded('keep_legacy', 'legacy-value'));
 
-    await clearRuntimeHintsFromApp({
+    await clearRuntimeHintValues({
       device,
       appId: packageName,
     });
@@ -563,15 +573,14 @@ test('clearRuntimeHintsFromApp removes managed Android runtime prefs from both f
   });
 });
 
-test('applyRuntimeHintsToApp writes iOS simulator React Native defaults', async () => {
+test('applyRuntimeHintValues writes iOS simulator React Native defaults', async () => {
   await withMockedXcrun(async ({ device, argsLogPath }) => {
-    await applyRuntimeHintsToApp({
+    await applyRuntimeHintValues({
       device,
       appId: 'com.example.demo',
-      runtime: {
-        platform: 'ios',
+      values: {
         metroHost: '127.0.0.1',
-        metroPort: 8081,
+        metroPort: '8081',
       },
     });
 
@@ -587,9 +596,9 @@ test('applyRuntimeHintsToApp writes iOS simulator React Native defaults', async 
   });
 });
 
-test('clearRuntimeHintsFromApp deletes iOS simulator React Native defaults', async () => {
+test('clearRuntimeHintValues deletes iOS simulator React Native defaults', async () => {
   await withMockedXcrun(async ({ device, argsLogPath }) => {
-    await clearRuntimeHintsFromApp({
+    await clearRuntimeHintValues({
       device,
       appId: 'com.example.demo',
     });

@@ -1,16 +1,23 @@
 import type { DaemonRequest, DaemonResponse } from '../types.ts';
 import { publicPlatformString } from '@agent-device/kernel/device';
+import {
+  clearRuntimeHintsRuntimeUse,
+  configureProviderPortReverseRuntimeUse,
+} from '@agent-device/contracts/platform';
+import type { ProviderPortReverseOptions } from '@agent-device/contracts/device';
 import { SessionStore } from '../session-store.ts';
-import { clearRuntimeHintsFromApp, hasRuntimeTransportHints } from '../runtime-hints.ts';
 import { errorResponse } from './response.ts';
+import { expireRefFrame } from '../ref-frame.ts';
+import { admitRuntimeUse } from '../runtime-admission.ts';
 import {
   buildRuntimeHints,
   countConfiguredRuntimeHints,
+  hasRuntimeTransportHints,
   mergeRuntimeHints,
+  runtimeHintValues,
   toRuntimePlatform,
 } from './session-runtime.ts';
-import { type ProviderPortReverseOptions } from '@agent-device/contracts/device';
-import { configureProviderPortReverse } from '../../provider-device-runtime.ts';
+import type { BindDeviceRuntime, InspectDeviceRuntimeFacts } from '../request-runtime-binding.ts';
 
 type RuntimeAction = 'set' | 'show' | 'clear';
 type PortReverseParseResult =
@@ -23,15 +30,51 @@ type PortReversePorts =
   | { ok: true; devicePort: number; hostPort: number }
   | { ok: false; response: DaemonResponse };
 
+type RuntimeCommandDevice = NonNullable<ReturnType<SessionStore['get']>>['device'];
+
+type RuntimeCommandAdmission = Readonly<{
+  device: RuntimeCommandDevice;
+  inspectFacts?: InspectDeviceRuntimeFacts;
+  bindDevice?: BindDeviceRuntime;
+}>;
+
+// `runtime set` and `show` are daemon session policy; this is the sole facts admission and
+// implementation binding for the one native effect, clearing applied runtime hints.
+async function admitClearRuntime(params: RuntimeCommandAdmission) {
+  return await admitRuntimeUse({
+    ...params,
+    command: 'runtime clear',
+    use: clearRuntimeHintsRuntimeUse,
+  });
+}
+
+// The provider owner is selected by the same facts/bind path as every other runtime operation.
+// This deliberately replaces the old provider-name lookup: no ambient request scope or local
+// fallback can turn an unsupported provider cell into a host-device tunnel.
+async function admitPortReverseRuntime(params: RuntimeCommandAdmission) {
+  return await admitRuntimeUse({
+    ...params,
+    command: 'runtime port-reverse',
+    use: configureProviderPortReverseRuntimeUse,
+  });
+}
+
 export async function handleRuntimeCommand(params: {
   req: DaemonRequest;
   sessionName: string;
   sessionStore: SessionStore;
+  inspectFacts?: InspectDeviceRuntimeFacts;
+  bindDevice?: BindDeviceRuntime;
 }): Promise<DaemonResponse> {
   const { req, sessionName, sessionStore } = params;
   const action = (req.positionals?.[0] ?? 'show').toLowerCase();
   if (action === 'port-reverse') {
-    return await handlePortReverseCommand(req);
+    return await handlePortReverseCommand({
+      req,
+      session: sessionStore.get(sessionName),
+      inspectFacts: params.inspectFacts,
+      bindDevice: params.bindDevice,
+    });
   }
   if (!isRuntimeAction(action)) {
     return errorResponse('INVALID_ARGS', 'runtime requires set, show, clear, or port-reverse');
@@ -39,7 +82,14 @@ export async function handleRuntimeCommand(params: {
   const session = sessionStore.get(sessionName);
   const current = sessionStore.getRuntimeHints(sessionName);
   if (action === 'clear') {
-    return await clearRuntimeCommand(sessionName, sessionStore, session, current);
+    return await clearRuntimeCommand({
+      sessionName,
+      sessionStore,
+      session,
+      current,
+      inspectFacts: params.inspectFacts,
+      bindDevice: params.bindDevice,
+    });
   }
   if (action === 'show') {
     return showRuntimeCommand(sessionName, current);
@@ -52,16 +102,28 @@ function isRuntimeAction(action: string): action is RuntimeAction {
   return action === 'set' || action === 'show' || action === 'clear';
 }
 
-async function clearRuntimeCommand(
-  sessionName: string,
-  sessionStore: SessionStore,
-  session: ReturnType<SessionStore['get']>,
-  current: ReturnType<SessionStore['getRuntimeHints']>,
-): Promise<DaemonResponse> {
+async function clearRuntimeCommand(params: {
+  sessionName: string;
+  sessionStore: SessionStore;
+  session: ReturnType<SessionStore['get']>;
+  current: ReturnType<SessionStore['getRuntimeHints']>;
+  inspectFacts?: InspectDeviceRuntimeFacts;
+  bindDevice?: BindDeviceRuntime;
+}): Promise<DaemonResponse> {
+  const { sessionName, sessionStore, session, current, inspectFacts, bindDevice } = params;
   if (hasRuntimeTransportHints(current) && session?.appBundleId) {
-    await clearRuntimeHintsFromApp({
+    const admission = await admitClearRuntime({
       device: session.device,
+      inspectFacts,
+      bindDevice,
+    });
+    if (admission.type === 'response') return admission.response;
+    // Native hint removal can change the app's reachable surface. Expire the existing frame at
+    // the mutation boundary, after admission and immediately before the bound package effect.
+    expireRefFrame(session);
+    await admission.runtime.operations.clearRuntimeHints({
       appId: session.appBundleId,
+      values: runtimeHintValues(current),
     });
   }
   const cleared = sessionStore.clearRuntimeHints(sessionName);
@@ -130,10 +192,38 @@ function setRuntimeCommand(params: {
   };
 }
 
-async function handlePortReverseCommand(req: DaemonRequest): Promise<DaemonResponse> {
+async function handlePortReverseCommand(params: {
+  req: DaemonRequest;
+  session: ReturnType<SessionStore['get']>;
+  inspectFacts?: InspectDeviceRuntimeFacts;
+  bindDevice?: BindDeviceRuntime;
+}): Promise<DaemonResponse> {
+  const { req, session, inspectFacts, bindDevice } = params;
   const parsed = readPortReverseOptions(req);
   if (!parsed.ok) return parsed.response;
-  const result = await configureProviderPortReverse(parsed.options);
+  if (!session) {
+    return errorResponse(
+      'SESSION_NOT_FOUND',
+      'runtime port-reverse requires an active provider-owned session.',
+    );
+  }
+  const admission = await admitPortReverseRuntime({
+    device: session.device,
+    inspectFacts,
+    bindDevice,
+  });
+  if (admission.type === 'response') return admission.response;
+  if (
+    admission.runtime.owner.kind !== 'provider-runtime' ||
+    admission.runtime.owner.provider !== parsed.options.provider
+  ) {
+    return errorResponse(
+      'UNSUPPORTED_OPERATION',
+      'The active session is not owned by the requested port-reverse provider.',
+      { provider: parsed.options.provider },
+    );
+  }
+  const result = await admission.runtime.operations.configureProviderPortReverse(parsed.options);
   if (!result) {
     return errorResponse(
       'UNSUPPORTED_OPERATION',

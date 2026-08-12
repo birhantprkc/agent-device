@@ -16,8 +16,10 @@ import type {
   AppleRunnerCommandOptions,
   AppleRunnerProvider,
 } from '../../../src/platforms/apple/core/runner/runner-provider.ts';
+import { providerRuntimeOwner } from '@agent-device/contracts/platform';
 import { assertRpcOk } from './assertions.ts';
 import { createProviderScenarioHarness, withProviderScenarioResource } from './harness.ts';
+import { createProviderScenarioLifecycleModule } from './provider-device-runtime.fixtures.ts';
 
 const PROVIDER = 'fake-ios-runner-provider';
 const DEVICE: DeviceInfo = {
@@ -183,9 +185,17 @@ async function createRunnerTransportWorld(options: { requestScope: boolean }) {
   const calls: RunnerTransportCalls = { runner: [], opens: 0 };
   const runtime = createProviderRuntime(calls, options);
   const providers = createProviderDeviceRuntimeRequestProviders([runtime]);
+  const providerModule = createProviderScenarioLifecycleModule(
+    runtime,
+    providerRuntimeOwner(PROVIDER, 'ios-runner-transport'),
+  );
   const daemon = await createProviderScenarioHarness({
     ...providers,
     deviceInventorySource: providers.deviceInventorySource!,
+    platformRuntime: {
+      providerRuntimes: [runtime],
+      providerModules: [{ runtime, module: providerModule }],
+    },
   });
   return {
     daemon,

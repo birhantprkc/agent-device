@@ -18,7 +18,11 @@ vi.mock('../../platforms/apple/core/runner/runner-client.ts', async (importOrigi
 vi.mock('../device-ready.ts', () => ({ ensureDeviceReady: vi.fn(async () => {}) }));
 
 import { dispatchCommand } from '../../core/dispatch.ts';
-import { createRequestHandler } from './test-device-runtime-gateway.ts';
+import { dispatchApplicationLifecycleEffect } from './application-lifecycle-runtime-fixture.ts';
+import {
+  createRequestHandler,
+  lifecycleDeviceRuntimeGateway,
+} from './test-device-runtime-gateway.ts';
 import type { DaemonRequest, SessionState } from '../types.ts';
 import { LeaseRegistry } from '../lease-registry.ts';
 import { makeSessionStore } from '../../__tests__/test-utils/store-factory.ts';
@@ -32,6 +36,7 @@ import { AppError, retriableForErrorCode } from '@agent-device/kernel/errors';
 import { supportedPlatformsForCommand } from '../../core/capabilities.ts';
 
 const mockDispatch = vi.mocked(dispatchCommand);
+const mockLifecycleEffect = vi.mocked(dispatchApplicationLifecycleEffect);
 
 /**
  * This file pins its own simulator rather than reusing the shared iOS fixture:
@@ -62,6 +67,7 @@ function makeHandler(sessionStore = makeSessionStore('agent-device-router-typed-
       token: 'test-token',
       sessionStore,
       leaseRegistry: new LeaseRegistry(),
+      deviceRuntimeGateway: lifecycleDeviceRuntimeGateway,
       deviceInventoryGateways: createTestDeviceInventoryGateways(),
       trackDownloadableArtifact: () => 'artifact-id',
     }),
@@ -81,6 +87,8 @@ function request(command: string, overrides: Partial<DaemonRequest> = {}): Daemo
 
 beforeEach(() => {
   mockDispatch.mockReset();
+  mockLifecycleEffect.mockReset();
+  mockLifecycleEffect.mockResolvedValue(undefined);
 });
 
 test('retriableForErrorCode is a conservative policy: transient => true, others => undefined', () => {
@@ -156,7 +164,7 @@ test('BLOCKER 2 (second follow-up): a repair-close platform-close failure surfac
   // DEVICE_NOT_FOUND is not in `retriableForErrorCode`'s conservative allow
   // list — if the handler ever regressed to relying on that code-level
   // fallback instead of forcing `retriable: true` itself, this would catch it.
-  mockDispatch.mockRejectedValueOnce(
+  mockLifecycleEffect.mockRejectedValueOnce(
     new AppError('DEVICE_NOT_FOUND', 'device vanished', {
       diagnosticId: 'diag-router-close-1',
       logPath: '/tmp/router-close-1.log',

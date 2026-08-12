@@ -14,6 +14,10 @@ import { createAndroidSettingsWorld, waitForFileContent } from './android-world.
 import { PROVIDER_SCENARIO_ANDROID } from './fixtures.ts';
 import { createProviderScenarioTempPath, withProviderScenarioResource } from './harness.ts';
 import {
+  androidImeClearTextBroadcast,
+  androidImeInputTextBroadcast,
+} from './android-ime-lifecycle-world.ts';
+import {
   ANDROID_LIFECYCLE_CONTRACT_EVIDENCE,
   ANDROID_TOUCH_CONTRACT_EVIDENCE,
 } from './android-lifecycle.coverage.ts';
@@ -1567,8 +1571,13 @@ function assertAndroidInteractionContract(world: AndroidSettingsWorld): void {
     adbCalls.filter((call) => arrayEqual(call, ['shell', 'input', 'tap', '88', '151'])).length,
     5,
   );
-  assertCommandCall(adbCalls, ['shell', 'input', 'text', 'Display']);
-  assertCommandCall(adbCalls, ['shell', 'input', 'text', 'Network']);
+  assertCommandCall(adbCalls, androidImeClearTextBroadcast);
+  assertCommandCall(adbCalls, androidImeInputTextBroadcast('Display'));
+  assertCommandCall(adbCalls, androidImeInputTextBroadcast('Network'));
+  assert.equal(
+    adbCalls.some((call) => call[0] === 'shell' && call[1] === 'input' && call[2] === 'text'),
+    false,
+  );
   assert.equal(
     adbCalls.filter((call) => arrayEqual(call, ['exec-out', 'screencap', '-p'])).length,
     3,

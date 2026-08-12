@@ -334,7 +334,7 @@ test('test applies per-script timeout and writes attempt artifacts', async () =>
     ).toBe(true);
     const resultText = fs.readFileSync(path.join(attemptDir, 'result.txt'), 'utf8');
     expect(resultText).toMatch(/status: failed/);
-    expect(resultText).toMatch(/timeoutMode: cooperative/);
+    expect(resultText).toMatch(/hint: Replay test timeouts are cooperative/);
   }
 });
 
@@ -342,7 +342,7 @@ test('open does not retain a session when the request was canceled before comple
   const sessionStore = makeSessionStore();
   const requestId = 'open-canceled-before-store';
   mockResolveTargetDevice.mockResolvedValue({
-    platform: 'ios',
+    platform: 'apple',
     id: 'sim-1',
     name: 'iPhone 17 Pro',
     kind: 'simulator',

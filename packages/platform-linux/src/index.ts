@@ -10,9 +10,9 @@ const metadata = Object.freeze({
 
 export const runtimeModule = Object.freeze({
   ...metadata,
-  loadRuntime: async (_host) => {
+  loadRuntime: async (host) => {
     const { createLinuxPlatformRuntime } = await import('./runtime.ts');
-    return createLinuxPlatformRuntime();
+    return createLinuxPlatformRuntime(host);
   },
 } satisfies PlatformRuntimeModule);
 

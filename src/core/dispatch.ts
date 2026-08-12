@@ -1,12 +1,7 @@
 import { screenshotOptionsFromFlags } from '@agent-device/contracts/capture';
-import { isDeepLinkTarget } from '@agent-device/contracts/command';
 import { parseDeviceRotation } from '@agent-device/contracts/device';
 import type { GesturePlan, Interactor, RunnerContext } from '@agent-device/contracts/interaction';
 import { parseTvRemoteButton } from '@agent-device/contracts/interaction';
-import {
-  LAUNCH_CONSOLE_DIRECT_APP_ONLY_MESSAGE,
-  LAUNCH_CONSOLE_IOS_SIMULATOR_ONLY_MESSAGE,
-} from '@agent-device/contracts/observability';
 import { isIosFamily, type DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
 import type { Rect } from '@agent-device/kernel/snapshot';
@@ -44,6 +39,26 @@ export async function dispatchCommand(
 ): Promise<Record<string, unknown> | void> {
   const runnerCtx = runnerContextFromDispatchContext(context);
   const interactor = await getInteractor(device, runnerCtx);
+  return await dispatchWithInteractor(
+    device,
+    interactor,
+    command,
+    positionals,
+    outPath,
+    context,
+    runnerCtx,
+  );
+}
+
+async function dispatchWithInteractor(
+  device: DeviceInfo,
+  interactor: Interactor,
+  command: string,
+  positionals: string[],
+  outPath: string | undefined,
+  context: DispatchContext | undefined,
+  runnerCtx: RunnerContext,
+): Promise<Record<string, unknown> | void> {
   emitDiagnostic({
     level: 'debug',
     phase: 'platform_command_prepare',
@@ -130,8 +145,6 @@ type DispatchHandler = (args: DispatchHandlerArgs) => Promise<Record<string, unk
  * behaviorless.
  */
 const DISPATCH_HANDLERS: Record<DispatchCommand, DispatchHandler> = {
-  open: ({ device, interactor, positionals, context }) =>
-    handleOpenCommand(device, interactor, positionals, context),
   close: async ({ device, interactor, positionals }) => {
     const app = positionals[0];
     if (!app) {
@@ -218,80 +231,6 @@ async function dispatchKnownCommand(
 // ---------------------------------------------------------------------------
 // Command handlers
 // ---------------------------------------------------------------------------
-
-// fallow-ignore-next-line complexity
-async function handleOpenCommand(
-  device: DeviceInfo,
-  interactor: Interactor,
-  positionals: string[],
-  context: DispatchContext | undefined,
-): Promise<Record<string, unknown>> {
-  const app = positionals[0];
-  const url = positionals[1];
-  const launchConsole = context?.launchConsole;
-  const launchArgs = context?.launchArgs;
-  if (positionals.length > 2) {
-    throw new AppError('INVALID_ARGS', 'open accepts at most two arguments: <app|url> [url]');
-  }
-  if (!app) {
-    if (launchConsole) {
-      throw new AppError('INVALID_ARGS', '--launch-console requires an app target');
-    }
-    if (launchArgs && launchArgs.length > 0) {
-      throw new AppError('INVALID_ARGS', '--launch-args requires an app target');
-    }
-    await interactor.openDevice();
-    return { app: null, ...successText('Opened device') };
-  }
-  if (launchConsole && (!isIosFamily(device) || device.kind !== 'simulator')) {
-    throw new AppError('UNSUPPORTED_OPERATION', LAUNCH_CONSOLE_IOS_SIMULATOR_ONLY_MESSAGE);
-  }
-  if (device.platform === 'linux' && launchArgs && launchArgs.length > 0) {
-    throw new AppError('UNSUPPORTED_OPERATION', '--launch-args is not supported on Linux.');
-  }
-  if (url !== undefined) {
-    if (isDeepLinkTarget(app)) {
-      throw new AppError(
-        'INVALID_ARGS',
-        'open <app> <url> requires an app target as the first argument',
-      );
-    }
-    if (!isDeepLinkTarget(url)) {
-      throw new AppError('INVALID_ARGS', 'open <app> <url> requires a valid URL target');
-    }
-    if (launchConsole) {
-      throw new AppError('INVALID_ARGS', LAUNCH_CONSOLE_DIRECT_APP_ONLY_MESSAGE);
-    }
-    await interactor.open(app, {
-      activity: context?.activity,
-      appBundleId: context?.appBundleId,
-      launchArgs,
-      terminateRunningApp: context?.terminateRunningApp,
-      url,
-    });
-    return { app, url, ...successText(`Opened: ${app}`) };
-  }
-  if (launchConsole && isDeepLinkTarget(app)) {
-    throw new AppError('INVALID_ARGS', LAUNCH_CONSOLE_DIRECT_APP_ONLY_MESSAGE);
-  }
-  if (context?.clearAppState) {
-    if (isDeepLinkTarget(app)) {
-      throw new AppError(
-        'INVALID_ARGS',
-        'Clearing app state requires an app target, not a deep link.',
-      );
-    }
-    await interactor.setSetting('clear-app-state', 'clear', app);
-  }
-  await interactor.open(app, {
-    activity: context?.activity,
-    appBundleId: context?.appBundleId,
-    launchConsole,
-    launchArgs,
-    terminateRunningApp: context?.terminateRunningApp,
-  });
-  return { app, ...(launchConsole ? { launchConsole } : {}), ...successText(`Opened: ${app}`) };
-}
 
 async function handleTriggerAppEventCommand(
   device: DeviceInfo,

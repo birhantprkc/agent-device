@@ -10,9 +10,9 @@ const metadata = Object.freeze({
 
 export const runtimeModule = Object.freeze({
   ...metadata,
-  loadRuntime: async (_host) => {
+  loadRuntime: async (host) => {
     const { createVegaPlatformRuntime } = await import('./runtime.ts');
-    return createVegaPlatformRuntime();
+    return createVegaPlatformRuntime(host);
   },
 } satisfies PlatformRuntimeModule);
 

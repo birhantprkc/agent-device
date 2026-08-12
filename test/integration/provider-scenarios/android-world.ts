@@ -10,12 +10,19 @@ import type {
 } from '../../../src/platforms/android/adb-executor.ts';
 import type { DeviceInventoryRequest } from '../../../src/core/dispatch-resolve.ts';
 import {
+  ANDROID_IME_HELPER_FIXTURE_ARTIFACT,
   ANDROID_SNAPSHOT_HELPER_FIXTURE_ARTIFACT,
   androidSnapshotHelperOutput,
 } from '../../../src/__tests__/test-utils/index.ts';
 import { runCmd, runCmdBackground } from '../../../src/utils/exec.ts';
 import { validPng } from './assertions.ts';
 import { PROVIDER_SCENARIO_ANDROID } from './fixtures.ts';
+import {
+  androidImeLifecycleAdbResult,
+  createAndroidProviderShellState,
+  type AndroidProviderShellState,
+  updateAndroidProviderImeShellState,
+} from './android-ime-lifecycle-world.ts';
 import { unexpectedProviderCall } from './providers.ts';
 import {
   createProviderScenarioHarness,
@@ -86,6 +93,7 @@ export async function createAndroidSettingsWorld(options?: {
   });
   const adbProvider: AndroidAdbProvider = {
     snapshotHelperArtifact: ANDROID_SNAPSHOT_HELPER_FIXTURE_ARTIFACT,
+    imeHelperArtifact: ANDROID_IME_HELPER_FIXTURE_ARTIFACT,
     gestureViewport: async () => {
       gestureViewportCalls += 1;
       return { x: 0, y: 0, width: 390, height: 600 };
@@ -105,6 +113,7 @@ export async function createAndroidSettingsWorld(options?: {
         shellState.searchText,
         shellState.clipboardText,
         {
+          ime: shellState,
           snapshotXml: options?.snapshotXml,
           dumpsysWindow:
             options?.dumpsysWindow ?? (() => androidForegroundWindowDump(appState.foreground)),
@@ -218,6 +227,7 @@ export function respondToAndroidSettingsAdbCommand(
   searchText: string,
   clipboardText: string,
   options: {
+    ime?: AndroidProviderShellState;
     snapshotXml?: () => string;
     dumpsysWindow?: () => string;
     pidof?: (packageName: string) => AndroidAdbResult | undefined;
@@ -226,6 +236,7 @@ export function respondToAndroidSettingsAdbCommand(
   const key = args.join(' ');
   const result =
     androidDeviceAvailabilityAdbResult(key, args, options.pidof) ??
+    androidImeLifecycleAdbResult(key, args, options.ime) ??
     androidClipboardAdbResult(key, clipboardText) ??
     androidMetricsAdbResult(key) ??
     androidPackageAdbResult(key, args, options.dumpsysWindow) ??
@@ -240,15 +251,6 @@ type AndroidAdbResult = {
   stdoutBuffer?: Buffer;
 };
 
-type AndroidProviderShellState = {
-  searchText: string;
-  clipboardText: string;
-};
-
-function createAndroidProviderShellState(): AndroidProviderShellState {
-  return { searchText: '', clipboardText: 'hello' };
-}
-
 const ANDROID_CLIPBOARD_SET_TEXT_PREFIX = ['shell', 'cmd', 'clipboard', 'set', 'text'];
 
 function updateAndroidProviderShellState(args: string[], state: AndroidProviderShellState): void {
@@ -260,7 +262,9 @@ function updateAndroidProviderShellState(args: string[], state: AndroidProviderS
     state.clipboardText = unquoteAndroidShellArg(
       String(args[ANDROID_CLIPBOARD_SET_TEXT_PREFIX.length] ?? ''),
     );
+    return;
   }
+  updateAndroidProviderImeShellState(args, state);
 }
 
 function argsStartWith(args: string[], prefix: string[]): boolean {

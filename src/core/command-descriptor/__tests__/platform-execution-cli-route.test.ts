@@ -263,7 +263,7 @@ describe('platform-execution coherence across CLI route delegation', () => {
       command === 'react-devtools' ? 'none' : registryKind(command);
 
     expect(dominanceFailures(plantedNone)).toEqual([
-      'react-devtools declares platformExecution none but its CLI route dispatches runtime (legacy)',
+      'react-devtools declares platformExecution none but its CLI route dispatches runtime (device-runtime)',
     ]);
   });
 

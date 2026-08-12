@@ -1,24 +1,36 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
-import { ANDROID_SNAPSHOT_HELPER_FIXTURE_ARTIFACT } from '../../../src/__tests__/test-utils/index.ts';
+import {
+  ANDROID_IME_HELPER_FIXTURE_ARTIFACT,
+  ANDROID_SNAPSHOT_HELPER_FIXTURE_ARTIFACT,
+} from '../../../src/__tests__/test-utils/index.ts';
 import type { AndroidAdbProvider } from '../../../src/platforms/android/adb-executor.ts';
 import { arrayEqual, assertCommandCall } from './assertions.ts';
 import { androidSettingsXml, androidSnapshotHelperOutput } from './android-world.ts';
+import {
+  androidImeClearTextBroadcast,
+  androidImeInputTextBroadcast,
+  androidImeLifecycleAdbResult,
+  createAndroidProviderShellState,
+  updateAndroidProviderImeShellState,
+} from './android-ime-lifecycle-world.ts';
 import { PROVIDER_SCENARIO_ANDROID } from './fixtures.ts';
 import { createProviderScenarioHarness } from './harness.ts';
 
 test('Provider-backed integration Android find flow covers refs, wait, ambiguity, and first/last selection', async () => {
   const adbCalls: string[][] = [];
-  let searchText = '';
   let includeDuplicateAppsRow = false;
+  const ime = createAndroidProviderShellState();
   const adbProvider: AndroidAdbProvider = {
     snapshotHelperArtifact: ANDROID_SNAPSHOT_HELPER_FIXTURE_ARTIFACT,
+    imeHelperArtifact: ANDROID_IME_HELPER_FIXTURE_ARTIFACT,
     exec: async (args) => {
       adbCalls.push([...args]);
+      updateAndroidProviderImeShellState(args, ime);
       if (args[0] === 'shell' && args[1] === 'input' && args[2] === 'text') {
-        searchText = String(args[3] ?? '').replaceAll('%s', ' ');
+        ime.searchText = String(args[3] ?? '').replaceAll('%s', ' ');
       }
-      return androidFindAdbResult(args, searchText, includeDuplicateAppsRow);
+      return androidFindAdbResult(args, ime.searchText, includeDuplicateAppsRow, ime);
     },
   };
   const daemon = await createProviderScenarioHarness({
@@ -171,8 +183,13 @@ test('Provider-backed integration Android find flow covers refs, wait, ambiguity
     assertCommandCall(adbCalls, ['shell', 'input', 'tap', '88', '151']);
     assertCommandCall(adbCalls, ['shell', 'input', 'tap', '122', '217']);
     assertCommandCall(adbCalls, ['shell', 'input', 'tap', '195', '52']);
-    assertCommandCall(adbCalls, ['shell', 'input', 'text', 'Display']);
-    assertCommandCall(adbCalls, ['shell', 'input', 'text', 'Network']);
+    assertCommandCall(adbCalls, androidImeInputTextBroadcast('Display'));
+    assertCommandCall(adbCalls, androidImeClearTextBroadcast);
+    assertCommandCall(adbCalls, androidImeInputTextBroadcast('Network'));
+    assert.equal(
+      adbCalls.some((call) => call[0] === 'shell' && call[1] === 'input' && call[2] === 'text'),
+      false,
+    );
     assert.equal(
       adbCalls.filter((call) => arrayEqual(call, ['shell', 'input', 'tap', '88', '151'])).length,
       2,
@@ -186,7 +203,10 @@ function androidFindAdbResult(
   args: string[],
   searchText: string,
   includeDuplicateAppsRow: boolean,
+  ime: ReturnType<typeof createAndroidProviderShellState>,
 ): { stdout: string; stderr: string; exitCode: number } {
+  const imeResult = androidImeLifecycleAdbResult(args.join(' '), args, ime);
+  if (imeResult) return imeResult;
   if (args.join(' ') === 'shell getprop sys.boot_completed') {
     return { stdout: '1\n', stderr: '', exitCode: 0 };
   }

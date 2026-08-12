@@ -98,7 +98,8 @@ export function createPlatformDeviceInventoryGateways(
   });
 }
 
-const platformRuntimeModules: ReadonlyMap<Platform, PlatformRuntimeModule> = new Map<
+/** The root composition registry shared by the gateway and bounded host-contract fixtures. */
+export const platformRuntimeModules: ReadonlyMap<Platform, PlatformRuntimeModule> = new Map<
   Platform,
   PlatformRuntimeModule
 >([

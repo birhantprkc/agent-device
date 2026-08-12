@@ -7,5 +7,10 @@ export function createAppleAutomationKeepHotHost(): DeviceReadinessRuntimeHost['
         .then(({ prewarmAppleRunnerCache }) => prewarmAppleRunnerCache(device, {}))
         .catch(() => {});
     },
+    markBooted: (device) => {
+      void import('./platforms/apple/core/simulator.ts')
+        .then(({ markSimulatorBooted }) => markSimulatorBooted(device))
+        .catch(() => {});
+    },
   });
 }

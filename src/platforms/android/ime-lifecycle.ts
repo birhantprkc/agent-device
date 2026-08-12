@@ -1,17 +1,22 @@
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { normalizeError } from '@agent-device/kernel/errors';
 import { emitDiagnostic } from '../../utils/diagnostics.ts';
 import { runCmd } from '../../utils/exec.ts';
+import { withKeyedLock } from '../../utils/keyed-lock.ts';
 import { resolveAndroidAdbExecutor, resolveAndroidAdbProvider } from './adb-executor.ts';
 import type { AndroidAdbExecutor } from './adb-executor.ts';
 import {
   ANDROID_IME_HELPER_SERVICE_COMPONENT,
   ensureAndroidImeHelper,
   getAndroidImeHelperDeviceKey,
-  resolveAndroidImeHelperArtifact,
+  selectAndroidImeHelperArtifact,
 } from './ime-helper.ts';
+import {
+  clearAndroidTestImeRecoveryMarker,
+  readAndroidTestImeRecoveryMarkers,
+  writeAndroidTestImeRecoveryMarker,
+} from './ime-recovery-marker.ts';
+import { waitForStartupRecoveryFence } from '@agent-device/contracts/platform';
 
 // Previous-IME record lives on the device (a custom `settings secure` key), not in a host-side
 // file, so any daemon/state-dir can recover it.
@@ -19,124 +24,102 @@ const SETTINGS_KEY_PREVIOUS_IME = 'agent_device_ime_helper_previous_ime';
 const SETTINGS_NAMESPACE = 'secure';
 const DEFAULT_INPUT_METHOD_KEY = 'default_input_method';
 
-// Device-scoped pending-recovery markers, one file per switched device, in the daemon state dir.
-// The daemon-startup orphan scan is gated on their presence (so a host that never uses the test
-// IME — the macOS CI runner included — never spawns adb at startup), and each device's marker is
-// retained until that specific device is observed clean, so an offline/disconnected device that is
-// still stuck is recovered when it reconnects rather than being forgotten.
-const PENDING_RECOVERY_DIR = 'android-test-ime-pending';
-
 // Per-daemon-process cache of devices with the test IME active; input-actions.ts reads this to
 // route text entry through the broadcast channel.
 const activeTestImeDevices = new Set<string>();
+const androidTestImeRecoveryLocks = new Map<string, Promise<unknown>>();
 
 export function isAndroidTestImeActive(device: DeviceInfo): boolean {
   return activeTestImeDevices.has(getAndroidImeHelperDeviceKey(device));
 }
 
-// --- device-scoped pending-recovery markers --------------------------------------------------
-
-function pendingRecoveryDir(stateDir: string): string {
-  return path.join(stateDir, PENDING_RECOVERY_DIR);
-}
-
-function pendingRecoveryFile(stateDir: string, serial: string): string {
-  return path.join(pendingRecoveryDir(stateDir), serial.replace(/[^a-zA-Z0-9._-]/g, '_'));
-}
-
-async function writePendingRecovery(stateDir: string, serial: string): Promise<void> {
-  try {
-    await fs.mkdir(pendingRecoveryDir(stateDir), { recursive: true });
-    // File name is sanitized for the filesystem; the body holds the exact serial to drive adb.
-    await fs.writeFile(pendingRecoveryFile(stateDir, serial), serial);
-  } catch (error) {
-    emitDiagnostic({
-      level: 'debug',
-      phase: 'android_test_ime_marker_write_failed',
-      data: { stateDir, serial, error: normalizeError(error).message },
-    });
-  }
-}
-
-async function clearPendingRecovery(stateDir: string, serial: string): Promise<void> {
-  await fs.rm(pendingRecoveryFile(stateDir, serial), { force: true }).catch(() => {});
-}
-
-async function readPendingRecoverySerials(stateDir: string): Promise<string[]> {
-  let files: string[];
-  try {
-    files = await fs.readdir(pendingRecoveryDir(stateDir));
-  } catch {
-    return [];
-  }
-  const serials: string[] = [];
-  for (const file of files) {
-    try {
-      const serial = (
-        await fs.readFile(path.join(pendingRecoveryDir(stateDir), file), 'utf8')
-      ).trim();
-      if (serial) serials.push(serial);
-    } catch {
-      // Torn/unreadable marker; ignore it.
-    }
-  }
-  return serials;
-}
-
-export type AndroidTestImeActivationResult = {
-  activated: boolean;
-  alreadyActive: boolean;
-  persistFailed?: boolean;
-  previousIme?: string;
-  helperServiceComponent: string;
-  helperPackageName: string;
-};
+export type AndroidTestImeActivationResult =
+  | Readonly<{
+      /**
+       * The helper could not be obtained for this device: no bundled or provider artifact, or the
+       * device refused the install. Nothing was mutated, so the caller falls back to ordinary text
+       * entry. Every other failure — startup fence, recovery lock, or anything after the durable
+       * records are touched — rejects instead of reporting an outcome.
+       */
+      outcome: 'helper-unavailable';
+      reason: string;
+    }>
+  | Readonly<{
+      outcome: 'settled';
+      activated: boolean;
+      alreadyActive: boolean;
+      persistFailed?: boolean;
+      previousIme?: string;
+      helperServiceComponent: string;
+      helperPackageName: string;
+    }>;
 
 export async function activateAndroidTestIme(
   device: DeviceInfo,
-  options: { stateDir?: string } = {},
+  options: { stateDir: string },
+): Promise<AndroidTestImeActivationResult> {
+  // Startup orphan recovery is intentionally fire-and-forget at daemon boot. Do not let an open
+  // mutate the same durable records/device IME until that recovery has observed its marker set.
+  await waitForStartupRecoveryFence(options.stateDir);
+  return await withAndroidTestImeRecoveryLock(
+    options.stateDir,
+    device.id,
+    async () => await activateAndroidTestImeAfterStartupRecovery(device, options),
+  );
+}
+
+async function activateAndroidTestImeAfterStartupRecovery(
+  device: DeviceInfo,
+  options: { stateDir: string },
 ): Promise<AndroidTestImeActivationResult> {
   const adb = resolveAndroidAdbExecutor(device);
   const adbProvider = resolveAndroidAdbProvider(device);
-  const artifact = await resolveAndroidImeHelperArtifact();
-  const { manifest } = artifact;
   const deviceKey = getAndroidImeHelperDeviceKey(device);
 
-  await ensureAndroidImeHelper({ adb, adbProvider, artifact, deviceKey });
+  // The acquisition seam, and the only step whose failure is an outcome rather than a rejection.
+  let artifact: Awaited<ReturnType<typeof selectAndroidImeHelperArtifact>>;
+  try {
+    artifact = await selectAndroidImeHelperArtifact(adbProvider);
+    await ensureAndroidImeHelper({ adb, adbProvider, artifact, deviceKey });
+  } catch (error) {
+    return { outcome: 'helper-unavailable', reason: normalizeError(error).message };
+  }
+  const { manifest } = artifact;
 
   const currentIme = await readAndroidDefaultInputMethod(adb);
   if (currentIme === manifest.serviceComponent) {
     // Already active (idempotent call, or a previous crashed daemon left it active); keep the
     // existing persisted previous-IME record rather than overwriting it, but make sure this
     // process's crash is covered by a recovery marker.
-    activeTestImeDevices.add(deviceKey);
-    if (options.stateDir) await writePendingRecovery(options.stateDir, device.id);
+    const markerPersisted = await writeAndroidTestImeRecoveryMarker(options.stateDir, device.id);
     const previousIme = await readPersistedPreviousIme(adb);
+    if (markerPersisted) activeTestImeDevices.add(deviceKey);
     return {
+      outcome: 'settled',
       activated: false,
       alreadyActive: true,
+      ...(markerPersisted ? {} : { persistFailed: true }),
       previousIme,
       helperServiceComponent: manifest.serviceComponent,
       helperPackageName: manifest.packageName,
     };
   }
 
-  // Mark active BEFORE switching so startup orphan-recovery (which only touches a device once it
-  // reads currentIme === helper) always also observes this flag and skips a session we are opening.
-  activeTestImeDevices.add(deviceKey);
-
   // Durably record the restore target BEFORE the switch: confirm the settings write succeeded and
-  // reads back. If it cannot be persisted, do NOT switch — fail open to the existing input path,
-  // so a rejected `settings put` can never strand the user on the helper with no restore target.
+  // reads back. If it cannot be persisted, do NOT switch and report a failed activation to the
+  // caller, so a rejected `settings put` can never strand the user on the helper with no restore
+  // target.
+  const priorPersistedIme = await readPersistedPreviousIme(adb);
   const persisted = await writePersistedPreviousIme(adb, currentIme);
   if (!persisted) {
-    activeTestImeDevices.delete(deviceKey);
+    await restorePriorPersistedIme(adb, priorPersistedIme, device.id);
     emitDiagnostic({
       level: 'warn',
       phase: 'android_test_ime_persist_failed',
       data: { device: device.id, previousIme: currentIme },
     });
     return {
+      outcome: 'settled',
       activated: false,
       alreadyActive: false,
       persistFailed: true,
@@ -148,7 +131,25 @@ export async function activateAndroidTestIme(
   // Write the recovery marker BEFORE the switch. Ordering (durable record -> marker -> ime set)
   // guarantees the switch never happens without both a restore target and a startup trigger, and
   // closes the post-switch/pre-marker crash window entirely.
-  if (options.stateDir) await writePendingRecovery(options.stateDir, device.id);
+  const hadRecoveryMarker = (await readAndroidTestImeRecoveryMarkers(options.stateDir)).includes(
+    device.id,
+  );
+  if (!(await writeAndroidTestImeRecoveryMarker(options.stateDir, device.id))) {
+    await restorePriorPersistedIme(adb, priorPersistedIme, device.id);
+    emitDiagnostic({
+      level: 'warn',
+      phase: 'android_test_ime_marker_persist_failed',
+      data: { device: device.id, previousIme: currentIme },
+    });
+    return {
+      outcome: 'settled',
+      activated: false,
+      alreadyActive: false,
+      persistFailed: true,
+      helperServiceComponent: manifest.serviceComponent,
+      helperPackageName: manifest.packageName,
+    };
+  }
 
   await adb(['shell', 'ime', 'enable', manifest.serviceComponent], {
     allowFailure: true,
@@ -162,16 +163,20 @@ export async function activateAndroidTestIme(
   const activeIme = await readAndroidDefaultInputMethod(adb);
   if (activeIme !== manifest.serviceComponent) {
     // Switch never took effect, so the helper is not the active IME and the record/marker are
-    // stale. Safe to clear here: this is the activating process, holding the device.
+    // stale. Roll back only records this activation changed; a valid pre-existing marker remains
+    // authoritative for its prior owner even when this attempted switch did not take effect.
     activeTestImeDevices.delete(deviceKey);
-    await clearPersistedPreviousIme(adb).catch(() => {});
-    if (options.stateDir) await clearPendingRecovery(options.stateDir, device.id);
+    await restorePriorPersistedIme(adb, priorPersistedIme, device.id);
+    if (!hadRecoveryMarker) {
+      await clearAndroidTestImeRecoveryMarker(options.stateDir, device.id);
+    }
     emitDiagnostic({
       level: 'warn',
       phase: 'android_test_ime_activate_failed',
       data: { device: device.id, activeIme, stderr: setResult.stderr.trim() },
     });
     return {
+      outcome: 'settled',
       activated: false,
       alreadyActive: false,
       helperServiceComponent: manifest.serviceComponent,
@@ -179,11 +184,15 @@ export async function activateAndroidTestIme(
     };
   }
 
+  // The recovery lock spans both durable records and the switch, so this process only claims
+  // active ownership after the helper is confirmed active on the device.
+  activeTestImeDevices.add(deviceKey);
   emitDiagnostic({
     phase: 'android_test_ime_activated',
     data: { device: device.id, previousIme: currentIme },
   });
   return {
+    outcome: 'settled',
     activated: true,
     alreadyActive: false,
     previousIme: currentIme,
@@ -207,23 +216,25 @@ export type AndroidTestImeRestoreResult = {
 
 export async function restoreAndroidTestIme(
   device: DeviceInfo,
-  options: { stateDir?: string } = {},
+  options: { stateDir: string },
 ): Promise<AndroidTestImeRestoreResult> {
-  const deviceKey = getAndroidImeHelperDeviceKey(device);
-  // Skip devices this process never activated (orphans from another process are handled by
-  // restoreOrphanedAndroidTestImeOnDaemonStartup and the doctor check).
-  if (!activeTestImeDevices.has(deviceKey)) {
-    return { restored: false, reason: 'no-record' };
-  }
-  // Drop the owned-flag first so restoreAndroidTestImeFor's "owned by a live session" guard does
-  // not skip this intentional close-time restore.
-  activeTestImeDevices.delete(deviceKey);
-  const adb = resolveAndroidAdbExecutor(device);
-  const result = await restoreAndroidTestImeFor(adb, device);
-  if (options.stateDir && isDeviceRecoveryComplete(result.reason)) {
-    await clearPendingRecovery(options.stateDir, device.id);
-  }
-  return result;
+  return await withAndroidTestImeRecoveryLock(options.stateDir, device.id, async () => {
+    const deviceKey = getAndroidImeHelperDeviceKey(device);
+    // Skip devices this process never activated (orphans from another process are handled by
+    // restoreOrphanedAndroidTestImeOnDaemonStartup and the doctor check).
+    if (!activeTestImeDevices.has(deviceKey)) {
+      return { restored: false, reason: 'no-record' };
+    }
+    // Drop the owned-flag first so restoreAndroidTestImeFor's "owned by a live session" guard does
+    // not skip this intentional close-time restore.
+    activeTestImeDevices.delete(deviceKey);
+    const adb = resolveAndroidAdbExecutor(device);
+    const result = await restoreAndroidTestImeFor(adb, device);
+    if (isDeviceRecoveryComplete(result.reason)) {
+      await clearAndroidTestImeRecoveryMarker(options.stateDir, device.id);
+    }
+    return result;
+  });
 }
 
 // A device no longer needs recovery once the helper is confirmed off it (restored, or already not
@@ -293,7 +304,7 @@ export async function restoreOrphanedAndroidTestImeOnDaemonStartup(params: {
   stateDir: string;
   listSerials: () => Promise<string[]>;
 }): Promise<void> {
-  const pending = await readPendingRecoverySerials(params.stateDir);
+  const pending = await readAndroidTestImeRecoveryMarkers(params.stateDir);
   if (pending.length === 0) {
     // No prior activation recorded for this state dir — nothing to recover, and no reason to spawn
     // adb (the macOS-CI regression this guard exists to prevent).
@@ -325,18 +336,20 @@ export async function restoreOrphanedAndroidTestImeOnDaemonStartup(params: {
       booted: true,
     };
     try {
-      const adb = resolveAndroidAdbExecutor(device);
-      const result = await restoreAndroidTestImeFor(adb, device);
-      if (result.restored) {
-        emitDiagnostic({
-          level: 'warn',
-          phase: 'android_test_ime_orphan_restored',
-          data: { device: serial, previousIme: result.previousIme },
-        });
-      }
-      if (isDeviceRecoveryComplete(result.reason)) {
-        await clearPendingRecovery(params.stateDir, serial);
-      }
+      await withAndroidTestImeRecoveryLock(params.stateDir, serial, async () => {
+        const adb = resolveAndroidAdbExecutor(device);
+        const result = await restoreAndroidTestImeFor(adb, device);
+        if (result.restored) {
+          emitDiagnostic({
+            level: 'warn',
+            phase: 'android_test_ime_orphan_restored',
+            data: { device: serial, previousIme: result.previousIme },
+          });
+        }
+        if (isDeviceRecoveryComplete(result.reason)) {
+          await clearAndroidTestImeRecoveryMarker(params.stateDir, serial);
+        }
+      });
     } catch (error) {
       // Keep the marker; a transient adb error must not drop a pending recovery.
       emitDiagnostic({
@@ -346,6 +359,14 @@ export async function restoreOrphanedAndroidTestImeOnDaemonStartup(params: {
       });
     }
   }
+}
+
+function withAndroidTestImeRecoveryLock<T>(
+  stateDir: string,
+  serial: string,
+  task: () => Promise<T>,
+): Promise<T> {
+  return withKeyedLock(androidTestImeRecoveryLocks, `${stateDir}:${serial}`, task);
 }
 
 export async function readAndroidDefaultInputMethod(adb: AndroidAdbExecutor): Promise<string> {
@@ -381,6 +402,41 @@ async function clearPersistedPreviousIme(adb: AndroidAdbExecutor): Promise<void>
     allowFailure: true,
     timeoutMs: 5_000,
   });
+}
+
+/** Restores the device record changed by a failed pre-switch transaction; never touches markers. */
+async function restorePriorPersistedIme(
+  adb: AndroidAdbExecutor,
+  priorPersistedIme: string | undefined,
+  deviceId: string,
+): Promise<void> {
+  try {
+    const restored = priorPersistedIme
+      ? await writePersistedPreviousIme(adb, priorPersistedIme)
+      : await clearAndConfirmPersistedPreviousIme(adb);
+    if (!restored) {
+      emitDiagnostic({
+        level: 'warn',
+        phase: 'android_test_ime_record_rollback_failed',
+        data: { device: deviceId, hadPriorRecord: priorPersistedIme !== undefined },
+      });
+    }
+  } catch (error) {
+    emitDiagnostic({
+      level: 'warn',
+      phase: 'android_test_ime_record_rollback_failed',
+      data: {
+        device: deviceId,
+        hadPriorRecord: priorPersistedIme !== undefined,
+        error: normalizeError(error).message,
+      },
+    });
+  }
+}
+
+async function clearAndConfirmPersistedPreviousIme(adb: AndroidAdbExecutor): Promise<boolean> {
+  await clearPersistedPreviousIme(adb);
+  return (await readPersistedPreviousIme(adb)) === undefined;
 }
 
 function normalizeSettingsValue(raw: string): string {

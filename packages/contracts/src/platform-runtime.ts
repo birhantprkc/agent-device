@@ -9,6 +9,7 @@ import {
 import { AppError } from '@agent-device/kernel/errors';
 import type { PlatformModuleMetadata } from './platform-module.ts';
 import type { PlatformRequestScope } from './platform-runtime-host.ts';
+import type { ApplicationLifecycleResourceLifecycle } from './application-lifecycle-runtime.ts';
 
 type RuntimeOperation = (...args: never[]) => unknown;
 
@@ -145,6 +146,8 @@ export type DeviceRuntimeGateway<Operations extends object> = Readonly<{
     import('./device-shutdown-runtime.ts').DeviceShutdownCloseCapability
   >;
   shutdown(): Promise<void>;
+  /** Package-coordinated durable lifecycle phases used for startup recovery and daemon shutdown. */
+  applicationLifecycle?: ApplicationLifecycleResourceLifecycle;
 }>;
 
 /** One selectable local or provider owner; narrow providers do not implement this interface. */

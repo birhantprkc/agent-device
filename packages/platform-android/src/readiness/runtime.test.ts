@@ -23,7 +23,7 @@ test('cancellation interrupts Android boot polling and terminates the emulator l
     clock: { now: () => 1, sleep: async () => {} },
     deviceReadiness: {
       applePhysical: { ensureConnected: async () => {} },
-      appleAutomation: { keepHot: () => {} },
+      appleAutomation: { keepHot: () => {}, markBooted: () => {} },
       androidEmulator: {
         discover: async () => {
           discoveries += 1;

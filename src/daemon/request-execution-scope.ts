@@ -40,6 +40,8 @@ import {
 } from './session-store.ts';
 import type { DaemonRequest, DaemonResponse, SessionState } from './types.ts';
 import { teardownSessionResources } from './session-teardown.ts';
+import { finalizeBoundSessionApplicationLifecycle } from './application-lifecycle-recovery.ts';
+import { runtimeHintValues } from './handlers/session-runtime.ts';
 import type {
   DeviceShutdownCloseCapability,
   DeviceRuntimeGateway,
@@ -222,12 +224,12 @@ export async function createRequestExecutionScope(params: {
           sessionStore,
           leaseRegistry,
           teardownSession: async (session, expiredSessionName) =>
-            await teardownSessionResources({
-              appLog: 'run',
+            await teardownExpiredSession({
               session,
               sessionName: expiredSessionName,
-              stateDir: sessionStore.resolveDaemonStateDir(),
               sessionStore,
+              inspectFacts: scope.inspectFacts,
+              bindDevice: scope.bindDevice,
             }),
         });
         scopedReq = admitRequestLeaseForLockedScope({
@@ -278,6 +280,51 @@ export async function createRequestExecutionScope(params: {
     }
     throw error;
   }
+}
+
+async function teardownExpiredSession(params: {
+  session: SessionState;
+  sessionName: string;
+  sessionStore: SessionStore;
+  inspectFacts: InspectDeviceRuntimeFacts;
+  bindDevice: BindDeviceRuntime;
+}): Promise<void> {
+  const { session, sessionName, sessionStore, inspectFacts, bindDevice } = params;
+  let primaryError: unknown;
+  try {
+    await teardownSessionResources({
+      appLog: 'run',
+      session,
+      sessionName,
+      sessionStore,
+    });
+  } catch (error) {
+    primaryError = error;
+  }
+  try {
+    await finalizeBoundSessionApplicationLifecycle({
+      inspectFacts,
+      bindDevice,
+      session,
+      stateDir: sessionStore.resolveDaemonStateDir(),
+      runtimeHints: runtimeHintValues(sessionStore.getRuntimeHints(sessionName)),
+    });
+  } catch (cleanupError) {
+    if (primaryError !== undefined) {
+      emitDiagnostic({
+        level: 'error',
+        phase: 'expired_session_lifecycle_cleanup_failed',
+        data: {
+          session: sessionName,
+          error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+          primaryError: primaryError instanceof Error ? primaryError.message : String(primaryError),
+        },
+      });
+    } else {
+      throw cleanupError;
+    }
+  }
+  if (primaryError !== undefined) throw primaryError;
 }
 
 function applyRequestCommandDefaults(req: DaemonRequest): DaemonRequest {

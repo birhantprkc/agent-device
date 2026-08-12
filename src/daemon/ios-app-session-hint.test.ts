@@ -198,8 +198,8 @@ test('resolveSoleForegroundIosApp returns undefined when the running-app probe i
 });
 
 test('resolveSoleForegroundIosApp catches a rejecting probe instead of propagating it', async () => {
-  // The catch-all lives in the resolver, so both consumers (the hint and
-  // open --foreground) inherit the never-propagate contract from one place.
+  // The hint's catch-all lives in the resolver, so an inconclusive local probe never masks the
+  // original session-not-found response.
   listBootedIosSimulators.mockRejectedValue(new Error('simctl timed out'));
 
   await expect(resolveSoleForegroundIosApp()).resolves.toBeUndefined();

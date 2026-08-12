@@ -41,26 +41,23 @@ vi.mock('../../../platforms/apple/core/perf-xctrace.ts', async (importOriginal) 
     await importOriginal<typeof import('../../../platforms/apple/core/perf-xctrace.ts')>();
   return { ...actual, cleanupAppleXctracePerfCapture: vi.fn(async () => ({})) };
 });
-vi.mock('../../runtime-hints.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../runtime-hints.ts')>();
-  return { ...actual, clearRuntimeHintsFromApp: vi.fn(async () => {}) };
+vi.mock('../../../platform-runtime-runtime-hints.ts', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../platform-runtime-runtime-hints.ts')>();
+  return { ...actual, clearRuntimeHintValues: vi.fn(async () => {}) };
 });
 vi.mock('../../../core/dispatch.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../core/dispatch.ts')>();
   return { ...actual, dispatchCommand: vi.fn(async () => ({})), resolveTargetDevice: vi.fn() };
 });
-vi.mock('../session-device-utils.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../session-device-utils.ts')>();
-  return { ...actual, settleIosSimulator: vi.fn(async () => {}) };
-});
-
 import fs from 'node:fs';
 import path from 'node:path';
 import { runReplayScriptFile } from '../session-replay-runtime.ts';
-import { handleCloseCommand } from '../session-close.ts';
+import { handleCloseCommand as handleProductionCloseCommand } from '../session-close.ts';
 import { SessionStore } from '../../session-store.ts';
 import { LeaseRegistry } from '../../lease-registry.ts';
 import { dispatchCommand } from '../../../core/dispatch.ts';
+import { dispatchApplicationLifecycleEffect } from '../../__tests__/application-lifecycle-runtime-fixture.ts';
 import { AppError } from '@agent-device/kernel/errors';
 import {
   makeIosSession,
@@ -85,8 +82,23 @@ import {
   writeReplayFile,
 } from './session-replay-runtime.fixtures.ts';
 import { freshEvidence, makeRecordingReplayInvoke } from './session-replay-repair.fixtures.ts';
+import {
+  bindLifecycleRuntime,
+  inspectLifecycleRuntimeFacts,
+} from './application-lifecycle-runtime-harness.ts';
 
 const mockDispatchCommand = vi.mocked(dispatchCommand);
+const mockLifecycleDispatch = vi.mocked(dispatchApplicationLifecycleEffect);
+
+function handleCloseCommand(
+  params: Omit<Parameters<typeof handleProductionCloseCommand>[0], 'inspectFacts' | 'bindDevice'>,
+) {
+  return handleProductionCloseCommand({
+    ...params,
+    inspectFacts: inspectLifecycleRuntimeFacts,
+    bindDevice: bindLifecycleRuntime,
+  });
+}
 
 /** The persisted per-target overwrite grant (#1258), or `false` outside any publication. */
 function sessionTargetForce(session: SessionState | undefined): boolean {
@@ -107,6 +119,8 @@ function sessionCloseReceipt(session: SessionState | undefined): string | undefi
 
 beforeEach(() => {
   mockDispatchCommand.mockReset();
+  mockLifecycleDispatch.mockReset();
+  mockLifecycleDispatch.mockResolvedValue(undefined);
   // The "current" app state: "save" was renamed to "save-v2" (why step 2
   // diverges), matching the target verification the SAVE_ANNOTATION triggers.
   mockDispatchCommand.mockResolvedValue({
@@ -927,7 +941,7 @@ test('BLOCKER 2 (new): a repair close whose PLATFORM close fails never commits a
     diagnosticId: 'diag-platform-close-1',
     logPath: '/tmp/platform-close-1.log',
   });
-  mockDispatchCommand.mockRejectedValueOnce(platformCloseError);
+  mockLifecycleDispatch.mockRejectedValueOnce(platformCloseError);
 
   const closeResponse = await handleCloseCommand({
     req: {
@@ -968,7 +982,7 @@ test('BLOCKER 2 (new): a repair close whose PLATFORM close fails never commits a
   expect(session.actions.some((a) => a.command === 'close')).toBe(false);
 
   // Retry once the platform close succeeds: commits cleanly.
-  mockDispatchCommand.mockResolvedValueOnce({});
+  mockLifecycleDispatch.mockResolvedValueOnce(undefined);
   const retry = await handleCloseCommand({
     req: {
       token: 't',
@@ -1000,7 +1014,7 @@ test('BLOCKER 3 (second follow-up): a retry after a SUCCESSFUL platform close bu
   // A prior COMPLETE (sentinel-marked) healed artifact already sits at the
   // default path — the commit must refuse to clobber it, giving a
   // deterministic commit FAILURE after a platform close that genuinely
-  // succeeds (mockDispatchCommand's `beforeEach` default resolves). A
+  // succeeds (the lifecycle seam's `beforeEach` default resolves). A
   // targeted close (an explicit positional app target) is what makes
   // `dispatchTargetedPlatformClose` actually dispatch instead of no-op.
   fs.writeFileSync(
@@ -1025,7 +1039,7 @@ test('BLOCKER 3 (second follow-up): a retry after a SUCCESSFUL platform close bu
 
   // The platform close genuinely ran and succeeded; the SUBSEQUENT commit
   // failed (no-clobber) — the session is retained for retry.
-  expect(mockDispatchCommand).toHaveBeenCalledTimes(1);
+  expect(mockLifecycleDispatch).toHaveBeenCalledTimes(1);
   expect(closeResponse.ok).toBe(false);
   if (!closeResponse.ok) expect(closeResponse.error.message).toMatch(/already exists/);
   expect(sessionStore.get(sessionName)).toBeDefined();
@@ -1052,7 +1066,7 @@ test('BLOCKER 3 (second follow-up): a retry after a SUCCESSFUL platform close bu
 
   // Still exactly ONE dispatch total — the retry consumed the recorded
   // success and went straight to the commit.
-  expect(mockDispatchCommand).toHaveBeenCalledTimes(1);
+  expect(mockLifecycleDispatch).toHaveBeenCalledTimes(1);
   expect(retry.ok).toBe(true);
   expect(fs.existsSync(retryPath)).toBe(true);
   const promoted = fs.readFileSync(retryPath, 'utf8');
@@ -1113,7 +1127,7 @@ test('BLOCKER 3 (third follow-up): an untargeted close that performed NO platfor
     leaseRegistry,
   });
   expect(first.ok).toBe(false);
-  expect(mockDispatchCommand).not.toHaveBeenCalled();
+  expect(mockLifecycleDispatch).not.toHaveBeenCalled();
   expect(sessionStore.get(sessionName)).toBeDefined();
 
   const retry = await handleCloseCommand({
@@ -1129,8 +1143,8 @@ test('BLOCKER 3 (third follow-up): an untargeted close that performed NO platfor
     sessionStore,
     leaseRegistry,
   });
-  expect(mockDispatchCommand).toHaveBeenCalledTimes(1);
-  expect(mockDispatchCommand.mock.calls[0]?.[2]).toEqual(['com.example.app']);
+  expect(mockLifecycleDispatch).toHaveBeenCalledTimes(1);
+  expect(mockLifecycleDispatch.mock.calls[0]?.[2]).toEqual(['com.example.app']);
   expect(retry.ok).toBe(true);
 });
 
@@ -1160,7 +1174,7 @@ test('BLOCKER 3 (third follow-up): a retry targeting a DIFFERENT app than the su
     leaseRegistry,
   });
   expect(first.ok).toBe(false);
-  expect(mockDispatchCommand).toHaveBeenCalledTimes(1);
+  expect(mockLifecycleDispatch).toHaveBeenCalledTimes(1);
   expect(sessionCloseReceipt(sessionStore.get(sessionName))).toBeDefined();
 
   // Retry targets a DIFFERENT app (app-b) — a genuinely different platform
@@ -1180,7 +1194,7 @@ test('BLOCKER 3 (third follow-up): a retry targeting a DIFFERENT app than the su
     sessionStore,
     leaseRegistry,
   });
-  expect(mockDispatchCommand).toHaveBeenCalledTimes(2);
-  expect(mockDispatchCommand.mock.calls[1]?.[2]).toEqual(['com.example.app-b']);
+  expect(mockLifecycleDispatch).toHaveBeenCalledTimes(2);
+  expect(mockLifecycleDispatch.mock.calls[1]?.[2]).toEqual(['com.example.app-b']);
   expect(retry.ok).toBe(true);
 });

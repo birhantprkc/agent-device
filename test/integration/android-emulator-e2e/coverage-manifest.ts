@@ -2,7 +2,10 @@ import { PUBLIC_COMMANDS } from '../../../src/command-catalog.ts';
 import { ANDROID_AUDIO_CONTRACT_EVIDENCE } from '../../../src/daemon/handlers/__tests__/session-audio.coverage.ts';
 import { ANDROID_INSTALL_SOURCE_CONTRACT_EVIDENCE } from '../../../src/platforms/__tests__/install-source.coverage.ts';
 import { ANDROID_LIFECYCLE_CONTRACT_EVIDENCE } from '../provider-scenarios/android-lifecycle.coverage.ts';
-import type { AndroidContractEvidence } from './contract-evidence.ts';
+import {
+  defineAndroidContractEvidence,
+  type AndroidContractEvidence,
+} from './contract-evidence.ts';
 
 type PublicCommand = (typeof PUBLIC_COMMANDS)[keyof typeof PUBLIC_COMMANDS];
 
@@ -37,6 +40,11 @@ const contract = (
   evidence,
   level: 'command-contract',
 });
+const ANDROID_APPLICATION_LIFECYCLE_CONTRACT_EVIDENCE = defineAndroidContractEvidence(
+  'packages/platform-android/src/runtime.test.ts',
+  [C.prepare],
+  'Android platform runtime classifies prepareAppleRunner unavailable',
+);
 
 /** One primary, observable owner for every public command on an Android emulator. */
 export const ANDROID_EMULATOR_E2E_COVERAGE = {
@@ -127,10 +135,10 @@ export const ANDROID_EMULATOR_E2E_COVERAGE = {
     'full:observability-artifacts',
     'startup, process memory, and CPU metrics are typed and numeric on the emulator',
   ),
-  [C.prepare]: {
-    assertion: 'Android emulator capability model rejects Apple runner preparation',
-    level: 'capability-denial',
-  },
+  [C.prepare]: contract(
+    ANDROID_APPLICATION_LIFECYCLE_CONTRACT_EVIDENCE,
+    'Android prepare fails closed through its unavailable prepareAppleRunner fact',
+  ),
   [C.press]: live('smoke:automation-system', 'semantic press updates durable fixture input state'),
   [C.push]: live(
     'full:lifecycle-system',

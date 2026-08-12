@@ -4,7 +4,7 @@ import * as path from 'node:path';
 import { buildSnapshotSignatures } from '../../android-snapshot-freshness.ts';
 import { AppError } from '@agent-device/kernel/errors';
 import {
-  mockDispatch,
+  mockLifecycleDispatch as mockDispatch,
   mockResolveTargetDevice,
   mockResolveAndroidPackage,
   mockRunCmd,
@@ -423,7 +423,7 @@ test('open on existing Android session preserves a comparable freshness baseline
     },
   });
 
-  mockDispatch.mockResolvedValue({});
+  mockDispatch.mockResolvedValue(undefined);
   mockResolveAndroidPackage.mockResolvedValue('com.android.settings');
 
   const response = await handleSessionCommands({

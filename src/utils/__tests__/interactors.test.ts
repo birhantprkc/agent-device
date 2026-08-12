@@ -13,7 +13,7 @@ vi.mock('../../platforms/apple/core/runner/runner-client.ts', async (importOrigi
   return { ...actual, runAppleRunnerCommand: vi.fn() };
 });
 
-import { getInteractor } from '../../core/interactors.ts';
+import { getInteractor, getLocalInteractor } from '../../core/interactors.ts';
 import { resolveAppleBackRunnerCommand } from '../../platforms/apple/interactions.ts';
 import { runAppleRunnerCommand } from '../../platforms/apple/core/runner/runner-client.ts';
 
@@ -78,6 +78,25 @@ test('provider device interactor receives runner context from core resolution', 
   setActiveProviderDeviceRuntimes([runtime]);
 
   assert.equal(await getInteractor(device, runnerContext), interactor);
+});
+
+test('local interactor resolution ignores an ambient provider owner', async () => {
+  const providerInteractor = { open: async () => undefined } as unknown as Interactor;
+  const provider: ProviderDeviceRuntime = {
+    provider: 'provider',
+    leaseLifecycle: {},
+    deviceInventoryProvider: async () => [],
+    ownsDevice: (candidate) => candidate.id === iosSimulator.id,
+    getInteractor: () => providerInteractor,
+    shutdown: async () => {},
+  };
+  setActiveProviderDeviceRuntimes([provider]);
+
+  const localInteractor = await getLocalInteractor(iosSimulator, {
+    appBundleId: 'com.example.app',
+  });
+
+  assert.notEqual(localInteractor, providerInteractor);
 });
 
 test('ios scroll sends a single fused scroll command and reports planned pixels', async () => {

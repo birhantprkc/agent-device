@@ -2,6 +2,7 @@ import { parseSync } from 'oxc-parser';
 import type { LayeringViolation } from './model.ts';
 import {
   cutoverRowDefects,
+  cutoverTableDefects,
   type CutoverCheck,
   type DeviceRuntimeCutover,
   type MigratedCommandCutover,
@@ -27,6 +28,15 @@ export function checkRuntimeCommandCutover(
   const programs = new Map<string, AstNode>(
     files.map(({ path, source }) => [path, parseSync(path, source).program as AstNode]),
   );
+  const tableDefects = cutoverTableDefects(table);
+  if (tableDefects.length > 0) {
+    return tableDefects.map((defect) => ({
+      rule: table[0]?.rule ?? 'cutover table',
+      file: '(cutover table)',
+      line: 1,
+      message: `cutover table ${defect}`,
+    }));
+  }
   return table.flatMap((row) =>
     rowViolations(row, files, programs).map((violation) => ({ rule: row.rule, ...violation })),
   );
@@ -73,6 +83,9 @@ function rowViolations(
 function rowChecks(row: MigratedCommandCutover): CutoverCheck[] {
   return [
     ...(row.execution === 'inventory' ? [row.singularExecution.gatewayProof] : []),
+    ...(row.execution === 'device-runtime' && row.singularExecution.routeProof !== undefined
+      ? [row.singularExecution.routeProof]
+      : []),
     ...(row.lifecycleProof === undefined ? [] : [row.lifecycleProof]),
     ...(row.extensions ?? []),
   ];
@@ -423,7 +436,8 @@ function exactCallViolations(
   programs: ReadonlyMap<string, AstNode>,
 ): UnruledViolation[] {
   if (row.execution !== 'device-runtime') return [];
-  const routes: readonly string[] = row.singularExecution.routes;
+  // A row that proves its single route with a dedicated check names no route here.
+  const routes: readonly string[] = row.singularExecution.routes ?? [];
   const operations: readonly string[] = row.singularExecution.operations ?? [];
   const routeCounts = new Map<string, number>(routes.map((name) => [name, 0]));
   const ownerNodes = new Map<string, AstNode[]>();
@@ -449,7 +463,7 @@ function exactCallViolations(
       operation,
       countOwnedOperationCalls(
         operation,
-        row.singularExecution.operationOwners[operation] ?? [],
+        row.singularExecution.operationOwners?.[operation] ?? [],
         ownerNodes,
       ),
     ]),

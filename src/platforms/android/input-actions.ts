@@ -14,6 +14,7 @@ import { emitDiagnostic } from '../../utils/diagnostics.ts';
 import { shellQuoteIfNeeded } from '../../utils/shell-quote.ts';
 import {
   resolveAndroidAdbExecutor,
+  resolveAndroidAdbProvider,
   resolveAndroidTextInjector,
   type AndroidTextInputAction,
 } from './adb-executor.ts';
@@ -28,7 +29,7 @@ import {
 } from './fill-verification.ts';
 import {
   clearAndroidImeHelperText,
-  resolveAndroidImeHelperArtifact,
+  selectAndroidImeHelperArtifact,
   sendAndroidImeHelperText,
 } from './ime-helper.ts';
 import { isAndroidTestImeActive } from './ime-lifecycle.ts';
@@ -222,7 +223,7 @@ async function typeAndroidTestIme(
   delayMs: number,
 ): Promise<void> {
   const adb = resolveAndroidAdbExecutor(device);
-  const artifact = await resolveAndroidImeHelperArtifact();
+  const artifact = await selectAndroidImeHelperArtifact(resolveAndroidAdbProvider(device));
   const packageName = artifact.manifest.packageName;
   const parts = text.split('\n');
   for (const [partIndex, part] of parts.entries()) {
@@ -248,7 +249,7 @@ async function fillAndroidTestIme(
   beforeTarget: AndroidFillVerification['targetInput'],
 ): Promise<AndroidFillVerification> {
   const adb = resolveAndroidAdbExecutor(device);
-  const artifact = await resolveAndroidImeHelperArtifact();
+  const artifact = await selectAndroidImeHelperArtifact(resolveAndroidAdbProvider(device));
   const packageName = artifact.manifest.packageName;
   let lastVerification: AndroidFillVerification | null = null;
   // One retry covers the rare not-yet-bound InputConnection right after focus.

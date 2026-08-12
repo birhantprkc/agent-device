@@ -37,9 +37,7 @@ export type CommandCapability = {
 const WEB_DEVICE: KindMatrix = { device: true };
 const HARMONYOS_ALL: KindMatrix = { emulator: true, device: true };
 const HARMONYOS_SUPPORTED_COMMANDS = new Set<string>([
-  'open',
   'perf',
-  'close',
   'back',
   'app-switcher',
   'click',
@@ -61,7 +59,6 @@ const HARMONYOS_SUPPORTED_COMMANDS = new Set<string>([
   'type',
   'wait',
 ]);
-const WEB_RUNTIME_COMMANDS = ['open', 'close'] as const;
 const WEB_QUERY_COMMANDS = [
   'audio',
   'find',
@@ -74,7 +71,6 @@ const WEB_QUERY_COMMANDS = [
 const WEB_INTERACTION_COMMANDS = ['click', 'fill', 'focus', 'press', 'scroll', 'type'] as const;
 const WEB_SETTING_COMMANDS = ['viewport'] as const;
 const WEB_SUPPORTED_COMMANDS = new Set<string>([
-  ...WEB_RUNTIME_COMMANDS,
   ...WEB_QUERY_COMMANDS,
   ...WEB_INTERACTION_COMMANDS,
   ...WEB_SETTING_COMMANDS,

@@ -4,8 +4,6 @@ import type { PlatformPlugin } from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 
 const VEGA_VVD_ONLY_COMMANDS = [
-  PUBLIC_COMMANDS.open,
-  PUBLIC_COMMANDS.close,
   PUBLIC_COMMANDS.back,
   PUBLIC_COMMANDS.home,
   PUBLIC_COMMANDS.tvRemote,

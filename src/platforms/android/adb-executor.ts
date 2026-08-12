@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Readable, Writable } from 'node:stream';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import type { Rect } from '@agent-device/kernel/snapshot';
+import type { AndroidImeHelperArtifact } from './ime-helper-types.ts';
 import type { AndroidSnapshotHelperArtifact } from './snapshot-helper-types.ts';
 import type { AndroidProviderTouchPlan } from './touch-plan.ts';
 import {
@@ -253,6 +254,7 @@ type AndroidAdbProviderBase = {
   installBundle?: AndroidBundleInstaller;
   text?: AndroidTextInjector;
   snapshotHelperArtifact?: AndroidSnapshotHelperArtifact;
+  imeHelperArtifact?: AndroidImeHelperArtifact;
 };
 
 type AndroidTouchCapabilities =

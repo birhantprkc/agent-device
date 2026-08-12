@@ -1,4 +1,10 @@
 import type { EnsureReadyInput, PlatformRuntimeHost } from '@agent-device/contracts/platform';
+
+/** Readiness reads exactly these host ports; the lifecycle binding composes the same subset. */
+export type AndroidReadinessHost = Pick<
+  PlatformRuntimeHost,
+  'clock' | 'commands' | 'deviceReadiness' | 'toolchains'
+>;
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
 
@@ -6,7 +12,7 @@ const BOOT_TIMEOUT_MS = 120_000;
 const POLL_MS = 1_000;
 
 export async function ensureAndroidReady(
-  host: PlatformRuntimeHost,
+  host: AndroidReadinessHost,
   device: DeviceInfo,
   input: EnsureReadyInput & Readonly<{ headless: boolean }>,
   signal: AbortSignal,
@@ -20,7 +26,7 @@ export async function ensureAndroidReady(
 }
 
 async function ensureEmulatorReady(
-  host: PlatformRuntimeHost,
+  host: AndroidReadinessHost,
   device: DeviceInfo,
   input: EnsureReadyInput & Readonly<{ headless: boolean }>,
   signal: AbortSignal,
@@ -51,7 +57,7 @@ async function ensureEmulatorReady(
   }
 }
 
-async function prepareAndroidEmulatorToolchain(host: PlatformRuntimeHost): Promise<void> {
+async function prepareAndroidEmulatorToolchain(host: AndroidReadinessHost): Promise<void> {
   await host.toolchains.prepare('android');
   if (!(await host.commands.which('adb'))) {
     throw new AppError('TOOL_MISSING', 'adb not found in PATH');
@@ -76,7 +82,7 @@ function requireAvailableAvd(
 }
 
 async function waitForDiscovery(
-  host: PlatformRuntimeHost,
+  host: AndroidReadinessHost,
   avdName: string,
   request: ReturnType<typeof inventoryRequest>,
   serial: string | undefined,
@@ -97,7 +103,7 @@ async function waitForDiscovery(
 }
 
 async function waitForBoot(
-  host: PlatformRuntimeHost,
+  host: AndroidReadinessHost,
   serial: string,
   timeoutMs: number,
   signal: AbortSignal,

@@ -1,13 +1,10 @@
 import { beforeEach, expect, test, vi } from 'vitest';
 
-const resolveSoleForegroundIosApp = vi.hoisted(() => vi.fn());
 const dispatchSnapshotViaRuntime = vi.hoisted(() => vi.fn());
 
-vi.mock('../../ios-app-session-hint.ts', () => ({ resolveSoleForegroundIosApp }));
 vi.mock('../../snapshot-runtime.ts', () => ({ dispatchSnapshotViaRuntime }));
 
 import { AppError } from '@agent-device/kernel/errors';
-import { IOS_SIMULATOR } from '../../../__tests__/test-utils/index.ts';
 import type { DaemonRequest, DaemonResponse } from '../../types.ts';
 import {
   composeOpenWithInitialSnapshot,
@@ -26,7 +23,6 @@ function baseRequest(overrides: Partial<DaemonRequest> = {}): DaemonRequest {
 }
 
 beforeEach(() => {
-  resolveSoleForegroundIosApp.mockReset();
   dispatchSnapshotViaRuntime.mockReset();
 });
 
@@ -39,7 +35,6 @@ test('leaves the request untouched when --foreground was not requested', async (
   });
 
   expect(resolution).toEqual({ type: 'not-requested' });
-  expect(resolveSoleForegroundIosApp).not.toHaveBeenCalled();
 });
 
 test('rejects --foreground against an existing session', async () => {
@@ -55,7 +50,6 @@ test('rejects --foreground against an existing session', async () => {
       expect(resolution.response.error.code).toBe('INVALID_ARGS');
     }
   }
-  expect(resolveSoleForegroundIosApp).not.toHaveBeenCalled();
 });
 
 test('keeps an explicit app and its target constraints for foreground composition on an existing session', async () => {
@@ -74,7 +68,6 @@ test('keeps an explicit app and its target constraints for foreground compositio
   });
 
   expect(resolution).toEqual({ type: 'resolved', req });
-  expect(resolveSoleForegroundIosApp).not.toHaveBeenCalled();
 });
 
 test.each([
@@ -97,7 +90,6 @@ test.each([
         expect(resolution.response.error.message).toMatch(/resolves the device itself/);
       }
     }
-    expect(resolveSoleForegroundIosApp).not.toHaveBeenCalled();
   },
 );
 
@@ -115,33 +107,11 @@ test('rejects --foreground with a non-iOS platform selector', async () => {
       expect(resolution.response.error.message).toMatch(/only supports --platform ios/);
     }
   }
-  expect(resolveSoleForegroundIosApp).not.toHaveBeenCalled();
 });
 
-test('an explicit --platform ios passes through to resolution', async () => {
-  const soleBootedDevice = { ...IOS_SIMULATOR, id: 'booted-1', name: 'iPhone 16' };
-  resolveSoleForegroundIosApp.mockResolvedValue({
-    device: soleBootedDevice,
-    app: { bundleId: 'xyz.blueskyweb.app', name: 'Bluesky' },
-  });
-
+test('a bare iOS foreground request reaches the admitted lifecycle target resolver unchanged', async () => {
   const resolution = await resolveForegroundOpenRequest({
     req: baseRequest({ flags: { foreground: true, platform: 'ios' } }),
-    hasExistingSession: false,
-  });
-
-  expect(resolution.type).toBe('resolved');
-});
-
-test('an unambiguous environment rewrites positionals and pins the resolved device', async () => {
-  const soleBootedDevice = { ...IOS_SIMULATOR, id: 'booted-1', name: 'iPhone 16' };
-  resolveSoleForegroundIosApp.mockResolvedValue({
-    device: soleBootedDevice,
-    app: { bundleId: 'xyz.blueskyweb.app', name: 'Bluesky' },
-  });
-
-  const resolution = await resolveForegroundOpenRequest({
-    req: baseRequest({ flags: { foreground: true, iosSimulatorDeviceSet: '/custom/set' } }),
     hasExistingSession: false,
   });
 
@@ -150,54 +120,10 @@ test('an unambiguous environment rewrites positionals and pins the resolved devi
     req: baseRequest({
       flags: {
         foreground: true,
-        iosSimulatorDeviceSet: '/custom/set',
-        udid: 'booted-1',
         platform: 'ios',
       },
-      positionals: ['xyz.blueskyweb.app'],
     }),
   });
-  expect(resolveSoleForegroundIosApp).toHaveBeenCalledWith({ simulatorSetPath: '/custom/set' });
-});
-
-test('an ambiguous environment fails closed with AMBIGUOUS_MATCH instead of guessing', async () => {
-  resolveSoleForegroundIosApp.mockResolvedValue(undefined);
-
-  const resolution = await resolveForegroundOpenRequest({
-    req: baseRequest({ flags: { foreground: true } }),
-    hasExistingSession: false,
-  });
-
-  expect(resolution.type).toBe('response');
-  if (resolution.type === 'response') {
-    expect(resolution.response.ok).toBe(false);
-    if (!resolution.response.ok) {
-      expect(resolution.response.error.code).toBe('AMBIGUOUS_MATCH');
-      expect(resolution.response.error.details?.reason).toBe('foreground_app_ambiguous');
-      expect(resolution.response.error.details?.hint).toMatch(/agent-device open <app>/);
-    }
-  }
-});
-
-test('a probe failure fails closed like ambiguity, never silently succeeds', async () => {
-  // The resolver owns the catch-all (see resolveSoleForegroundIosApp): a
-  // rejecting simctl/launchctl probe surfaces as `undefined`, which this
-  // handler must treat exactly like ambiguity — a hard AMBIGUOUS_MATCH, not
-  // a guessed target.
-  resolveSoleForegroundIosApp.mockResolvedValue(undefined);
-
-  const resolution = await resolveForegroundOpenRequest({
-    req: baseRequest({ flags: { foreground: true } }),
-    hasExistingSession: false,
-  });
-
-  expect(resolution.type).toBe('response');
-  if (resolution.type === 'response') {
-    expect(resolution.response.ok).toBe(false);
-    if (!resolution.response.ok) {
-      expect(resolution.response.error.code).toBe('AMBIGUOUS_MATCH');
-    }
-  }
 });
 
 // --- composeOpenWithInitialSnapshot ---

@@ -34,7 +34,7 @@ test('cancellation interrupts simulator bootstatus and schedules cleanup for the
     },
     deviceReadiness: {
       ...platformRuntimeHostFixture().deviceReadiness,
-      appleAutomation: { keepHot },
+      appleAutomation: { keepHot, markBooted: vi.fn() },
     },
   } satisfies PlatformRuntimeHost;
 

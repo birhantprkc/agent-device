@@ -5,8 +5,6 @@ export type CloudWebDriverOperation =
   | 'lease'
   | 'inventory'
   | 'install'
-  | 'open'
-  | 'close'
   | 'snapshot'
   | 'screenshot'
   | 'tap'
@@ -70,8 +68,6 @@ const BASE_WEBDRIVER_CAPABILITIES: CloudWebDriverCapabilityMap = {
     support: 'partial',
     note: 'Requires provider-specific upload or a path visible to the remote Appium server.',
   },
-  open: supported,
-  close: supported,
   snapshot: {
     support: 'partial',
     note: 'Uses Appium page source XML, not agent-device native snapshot backends.',

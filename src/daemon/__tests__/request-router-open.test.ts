@@ -7,20 +7,23 @@ import { getResolveTargetDeviceMock } from './request-router-dispatch-mocks.ts';
 import { mkdtempForTestSync } from '../../__tests__/test-utils/tmp-dir.ts';
 
 vi.mock('../device-ready.ts', () => ({ ensureDeviceReady: vi.fn(async () => {}) }));
-vi.mock('../session-teardown.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../session-teardown.ts')>();
-  return { ...actual, stopAppleRunnerForClose: vi.fn(async () => {}) };
-});
 vi.mock('../../utils/host-process.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../utils/host-process.ts')>();
   return { ...actual, readProcessStartTime: vi.fn(() => 'test-process-start') };
 });
 
 import { dispatchCommand } from '../../core/dispatch.ts';
-import { createRequestHandler } from './test-device-runtime-gateway.ts';
+import {
+  createRequestHandler,
+  lifecycleDeviceRuntimeGateway,
+} from './test-device-runtime-gateway.ts';
 import { resolveRequestExecutionLockKeys } from '../request-binding.ts';
 import { LeaseRegistry } from '../lease-registry.ts';
 import { ensureDeviceReady } from '../device-ready.ts';
+import {
+  awaitFixtureReadiness,
+  discoverReadyAndroidEmulators,
+} from './application-lifecycle-runtime-fixture.ts';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
 import { makeSessionStore } from '../../__tests__/test-utils/store-factory.ts';
@@ -29,6 +32,10 @@ import { inspectDeviceClaims } from '../device-claim-inspection.ts';
 const mockDispatch = vi.mocked(dispatchCommand);
 const mockResolveTargetDevice = vi.mocked(getResolveTargetDeviceMock());
 const mockEnsureDeviceReady = vi.mocked(ensureDeviceReady);
+// The open path reaches readiness through its admitted package binding, so router-level
+// serialization is observed at the fixture's emulator-discovery seam.
+const mockDiscoverReadyAndroidEmulators = vi.mocked(discoverReadyAndroidEmulators);
+const mockAwaitFixtureReadiness = vi.mocked(awaitFixtureReadiness);
 
 function makeIosDevice(id: string): DeviceInfo {
   return {
@@ -61,6 +68,7 @@ function createOpenHandler(
     token: 'test-token',
     sessionStore,
     leaseRegistry,
+    deviceRuntimeGateway: lifecycleDeviceRuntimeGateway,
     deviceInventoryGateways: createTestDeviceInventoryGateways(),
     trackDownloadableArtifact: () => 'artifact-id',
   });
@@ -89,6 +97,16 @@ beforeEach(() => {
   mockResolveTargetDevice.mockReset();
   mockEnsureDeviceReady.mockReset();
   mockEnsureDeviceReady.mockResolvedValue(undefined);
+  mockAwaitFixtureReadiness.mockReset();
+  mockAwaitFixtureReadiness.mockResolvedValue(undefined);
+  mockDiscoverReadyAndroidEmulators.mockReset();
+  mockDiscoverReadyAndroidEmulators.mockImplementation(async (device) => [
+    {
+      ...device,
+      id: device.id.startsWith('emulator-') ? device.id : `emulator-${device.id}`,
+      booted: true,
+    },
+  ]);
 });
 
 // fallow-ignore-next-line complexity
@@ -102,10 +120,6 @@ test('open returns and creates the session state directory', async () => {
   const response = await handler(openRequest('session-a', { platform: 'ios' }, 'req-open-state'));
 
   expect(response.ok).toBe(true);
-  expect(mockEnsureDeviceReady.mock.calls[0]?.[1]).toEqual({
-    deviceHub: false,
-    onIosSimulatorColdBootStart: undefined,
-  });
   if (response.ok) {
     expect(response.data?.session).toBe('session-a');
     expect(response.data?.sessionReused).toBe(false);
@@ -442,7 +456,7 @@ test('router serializes same-device open requests before first session creation 
   const firstEnsureStarted = new Promise<void>((resolve) => {
     markFirstEnsureStarted = resolve;
   });
-  mockEnsureDeviceReady.mockImplementation(async () => {
+  mockAwaitFixtureReadiness.mockImplementation(async () => {
     ensureCalls += 1;
     activeEnsures += 1;
     maxActiveEnsures = Math.max(maxActiveEnsures, activeEnsures);
@@ -507,7 +521,7 @@ test('router allows pre-open requests for different devices to proceed concurren
   const bothEnsuresStarted = new Promise<void>((resolve) => {
     markBothEnsuresStarted = resolve;
   });
-  mockEnsureDeviceReady.mockImplementation(async () => {
+  mockAwaitFixtureReadiness.mockImplementation(async () => {
     ensureCalls += 1;
     activeEnsures += 1;
     maxActiveEnsures = Math.max(maxActiveEnsures, activeEnsures);

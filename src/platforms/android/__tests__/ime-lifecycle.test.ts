@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { promises as fsp } from 'node:fs';
 import path from 'node:path';
-import { beforeEach, test, vi } from 'vitest';
+import { beforeEach, expect, test, vi } from 'vitest';
 import { mkdtempForTest } from '../../../__tests__/test-utils/tmp-dir.ts';
 
 const HELPER_SERVICE = 'com.callstack.agentdevice.imehelper/.TestInputMethodService';
@@ -13,21 +13,25 @@ const PENDING_DIR = 'android-test-ime-pending';
 vi.mock('../ime-helper.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../ime-helper.ts')>();
   const fixture = await import('../../../__tests__/test-utils/android-snapshot-helper.ts');
+  // Lazy: the factory is hoisted above this file's top-level constants.
+  const artifact = () => ({
+    apkPath: fixture.ANDROID_SNAPSHOT_HELPER_FIXTURE_ARTIFACT.apkPath,
+    manifest: {
+      name: 'android-ime-helper' as const,
+      version: '0.0.0',
+      assetName: 'helper.apk',
+      sha256: fixture.ANDROID_SNAPSHOT_HELPER_FIXTURE_ARTIFACT.manifest.sha256,
+      packageName: 'com.callstack.agentdevice.imehelper',
+      versionCode: 1,
+      serviceComponent: HELPER_SERVICE,
+      broadcastProtocol: 'android-ime-helper-v1' as const,
+    },
+  });
   return {
     ...actual,
-    resolveAndroidImeHelperArtifact: vi.fn(async () => ({
-      apkPath: fixture.ANDROID_SNAPSHOT_HELPER_FIXTURE_ARTIFACT.apkPath,
-      manifest: {
-        name: 'android-ime-helper' as const,
-        version: '0.0.0',
-        assetName: 'helper.apk',
-        sha256: fixture.ANDROID_SNAPSHOT_HELPER_FIXTURE_ARTIFACT.manifest.sha256,
-        packageName: 'com.callstack.agentdevice.imehelper',
-        versionCode: 1,
-        serviceComponent: HELPER_SERVICE,
-        broadcastProtocol: 'android-ime-helper-v1' as const,
-      },
-    })),
+    // Both the bundled resolver and the provider-aware selector answer with this fixture.
+    resolveAndroidImeHelperArtifact: vi.fn(async () => artifact()),
+    selectAndroidImeHelperArtifact: vi.fn(async () => artifact()),
   };
 });
 
@@ -41,9 +45,14 @@ import {
   restoreOrphanedAndroidTestImeOnDaemonStartup,
   resetAndroidTestImeActivationCacheForTests,
 } from '../ime-lifecycle.ts';
-import { teardownSessionResources } from '../../../daemon/session-teardown.ts';
-import { SessionStore } from '../../../daemon/session-store.ts';
-import type { SessionState } from '../../../daemon/types.ts';
+import {
+  resetStartupRecoveryFencesForTests,
+  runStartupRecoveryFence,
+} from '@agent-device/contracts/platform';
+import {
+  readAndroidTestImeRecoveryMarkers,
+  writeAndroidTestImeRecoveryMarker,
+} from '../ime-recovery-marker.ts';
 
 const LATIN_IME = 'com.google.android.inputmethod.latin/.LatinIME';
 const SERIAL = ANDROID_EMULATOR.id;
@@ -51,6 +60,7 @@ const SERIAL = ANDROID_EMULATOR.id;
 beforeEach(() => {
   resetAndroidImeHelperInstallCache();
   resetAndroidTestImeActivationCacheForTests();
+  resetStartupRecoveryFencesForTests();
 });
 
 async function makeStateDir(): Promise<string> {
@@ -58,7 +68,7 @@ async function makeStateDir(): Promise<string> {
 }
 
 function pendingFile(stateDir: string, serial: string): string {
-  return path.join(stateDir, PENDING_DIR, serial.replace(/[^a-zA-Z0-9._-]/g, '_'));
+  return path.join(stateDir, PENDING_DIR, encodeURIComponent(serial));
 }
 
 async function pendingMarkerExists(stateDir: string, serial: string): Promise<boolean> {
@@ -82,6 +92,9 @@ function fakeDeviceState(initialIme: string) {
   let previousImeRecord: string | undefined;
   let installed = false;
   let failPersist = false;
+  let mismatchNextPersistReadback = false;
+  let returnMismatchForNextPersistReadback = false;
+  let imeSetCalls = 0;
   // `ime set <target>` for a blocked target reports success but does not change the active IME —
   // simulates a device that refuses the switch (so the restore read-back mismatches).
   const blockedImeSetTargets = new Set<string>();
@@ -93,6 +106,7 @@ function fakeDeviceState(initialIme: string) {
   }
 
   function handleImeSet(args: string[]): FakeAdbResult {
+    imeSetCalls++;
     const target = args[3] as string;
     if (blockedImeSetTargets.has(target)) return ok();
     defaultIme = target;
@@ -102,6 +116,10 @@ function fakeDeviceState(initialIme: string) {
   function handleSettingsGet(args: string[]): FakeAdbResult {
     const key = args[4];
     if (key === 'default_input_method') return ok(defaultIme);
+    if (key === SETTINGS_KEY && returnMismatchForNextPersistReadback) {
+      returnMismatchForNextPersistReadback = false;
+      return ok('com.example.stale/.Ime');
+    }
     if (key === SETTINGS_KEY) return ok(previousImeRecord ?? 'null');
     throw new Error(`unexpected settings get key: ${String(key)}`);
   }
@@ -110,6 +128,10 @@ function fakeDeviceState(initialIme: string) {
     if (args[4] === SETTINGS_KEY) {
       if (failPersist) return { exitCode: 1, stdout: '', stderr: 'rejected' };
       previousImeRecord = args[5];
+      if (mismatchNextPersistReadback) {
+        mismatchNextPersistReadback = false;
+        returnMismatchForNextPersistReadback = true;
+      }
     }
     return ok();
   }
@@ -144,11 +166,18 @@ function fakeDeviceState(initialIme: string) {
     setFailPersist: (value: boolean) => {
       failPersist = value;
     },
+    failNextPersistReadback: () => {
+      mismatchNextPersistReadback = true;
+    },
+    setPreviousImeRecord: (value: string | undefined) => {
+      previousImeRecord = value;
+    },
     forceCurrentIme: (value: string) => {
       defaultIme = value;
     },
     getCurrentIme: () => defaultIme,
     getPreviousImeRecord: () => previousImeRecord,
+    getImeSetCalls: () => imeSetCalls,
   };
 }
 
@@ -159,6 +188,7 @@ test('activateAndroidTestIme durably persists the previous IME and marks the dev
 
   await withAndroidAdbProvider(state.adb, { serial: SERIAL }, async () => {
     const result = await activateAndroidTestIme(ANDROID_EMULATOR, { stateDir });
+    assert.equal(result.outcome, 'settled');
     assert.equal(result.activated, true);
     assert.equal(result.previousIme, LATIN_IME);
     assert.equal(state.getCurrentIme(), HELPER_SERVICE);
@@ -169,7 +199,34 @@ test('activateAndroidTestIme durably persists the previous IME and marks the dev
   });
 });
 
-test('activateAndroidTestIme fails open (no IME switch) when the previous IME cannot be persisted', async () => {
+test('planted race: open waits for startup IME recovery before touching either recovery record or switch', async () => {
+  const state = fakeDeviceState(LATIN_IME);
+  state.markInstalled();
+  const stateDir = await makeStateDir();
+  let releaseRecovery!: () => void;
+
+  await withAndroidAdbProvider(state.adb, { serial: SERIAL }, async () => {
+    const recovery = runStartupRecoveryFence(stateDir, async () => {
+      await new Promise<void>((resolve) => {
+        releaseRecovery = resolve;
+      });
+    });
+    const activation = activateAndroidTestIme(ANDROID_EMULATOR, { stateDir });
+    await Promise.resolve();
+
+    // This is a deliberate red witness for the old race: without the fence, activation reaches
+    // `ime set` while recovery is still unresolved.
+    assert.equal(state.getImeSetCalls(), 0);
+    assert.equal(state.getCurrentIme(), LATIN_IME);
+
+    releaseRecovery();
+    await recovery;
+    await expect(activation).resolves.toMatchObject({ activated: true });
+    assert.equal(state.getCurrentIme(), HELPER_SERVICE);
+  });
+});
+
+test('activateAndroidTestIme fails closed (no IME switch) when the previous IME cannot be persisted', async () => {
   const state = fakeDeviceState(LATIN_IME);
   state.markInstalled();
   state.setFailPersist(true); // `settings put` is rejected
@@ -177,15 +234,63 @@ test('activateAndroidTestIme fails open (no IME switch) when the previous IME ca
 
   await withAndroidAdbProvider(state.adb, { serial: SERIAL }, async () => {
     const result = await activateAndroidTestIme(ANDROID_EMULATOR, { stateDir });
+    assert.equal(result.outcome, 'settled');
 
     assert.equal(result.activated, false);
     assert.equal(result.persistFailed, true);
-    // Must NOT switch the IME — the user falls open to the existing input path.
+    // Must NOT switch the IME; the caller receives `persistFailed` and aborts the open.
     assert.equal(state.getCurrentIme(), LATIN_IME);
     assert.equal(state.getPreviousImeRecord(), undefined);
+    assert.equal(state.getImeSetCalls(), 0);
     assert.equal(isAndroidTestImeActive(ANDROID_EMULATOR), false);
     // No marker: nothing was switched, so there is nothing to recover.
     assert.equal(await pendingMarkerExists(stateDir, SERIAL), false);
+  });
+});
+
+test('activateAndroidTestIme rolls back a partial first recovery-record write without erasing its valid marker', async () => {
+  const state = fakeDeviceState(LATIN_IME);
+  const priorIme = 'com.example.prior/.Ime';
+  state.markInstalled();
+  state.setPreviousImeRecord(priorIme);
+  state.failNextPersistReadback();
+  const stateDir = await makeStateDir();
+  assert.equal(await writeAndroidTestImeRecoveryMarker(stateDir, SERIAL), true);
+
+  await withAndroidAdbProvider(state.adb, { serial: SERIAL }, async () => {
+    const result = await activateAndroidTestIme(ANDROID_EMULATOR, { stateDir });
+    assert.equal(result.outcome, 'settled');
+
+    assert.equal(result.activated, false);
+    assert.equal(result.persistFailed, true);
+    assert.equal(state.getCurrentIme(), LATIN_IME);
+    assert.equal(state.getPreviousImeRecord(), priorIme);
+    assert.equal(state.getImeSetCalls(), 0);
+    assert.deepEqual(await readAndroidTestImeRecoveryMarkers(stateDir), [SERIAL]);
+  });
+});
+
+test('activateAndroidTestIme fails closed when its second recovery-record write cannot be persisted', async () => {
+  const state = fakeDeviceState(LATIN_IME);
+  const priorIme = 'com.example.prior/.Ime';
+  state.markInstalled();
+  state.setPreviousImeRecord(priorIme);
+  const stateDir = await makeStateDir();
+  const survivingMarkerSerial = 'emulator-5556';
+  assert.equal(await writeAndroidTestImeRecoveryMarker(stateDir, survivingMarkerSerial), true);
+  await fsp.mkdir(pendingFile(stateDir, SERIAL), { recursive: true });
+
+  await withAndroidAdbProvider(state.adb, { serial: SERIAL }, async () => {
+    const result = await activateAndroidTestIme(ANDROID_EMULATOR, { stateDir });
+    assert.equal(result.outcome, 'settled');
+
+    assert.equal(result.activated, false);
+    assert.equal(result.persistFailed, true);
+    assert.equal(state.getCurrentIme(), LATIN_IME);
+    assert.equal(state.getPreviousImeRecord(), priorIme);
+    assert.equal(isAndroidTestImeActive(ANDROID_EMULATOR), false);
+    assert.equal(state.getImeSetCalls(), 0);
+    assert.deepEqual(await readAndroidTestImeRecoveryMarkers(stateDir), [survivingMarkerSerial]);
   });
 });
 
@@ -210,9 +315,10 @@ test('restoreAndroidTestIme restores the previous IME, clears the record and the
 
 test('restoreAndroidTestIme is a no-op when nothing was ever activated', async () => {
   const state = fakeDeviceState(LATIN_IME);
+  const stateDir = await makeStateDir();
 
   await withAndroidAdbProvider(state.adb, { serial: SERIAL }, async () => {
-    const result = await restoreAndroidTestIme(ANDROID_EMULATOR);
+    const result = await restoreAndroidTestIme(ANDROID_EMULATOR, { stateDir });
     assert.equal(result.restored, false);
   });
 });
@@ -251,32 +357,16 @@ test('a failed restore keeps the recovery value AND the marker for a later retry
   });
 });
 
-test('session teardown fails when a real IME restore reports set-failed', async () => {
+test('the Android close resource retains a real IME restore set-failed result', async () => {
   const state = fakeDeviceState(LATIN_IME);
   const stateDir = await makeStateDir();
-  const sessionStore = new SessionStore(path.join(stateDir, 'sessions'));
-  const session: SessionState = {
-    name: 'ime-restore-failure',
-    device: ANDROID_EMULATOR,
-    createdAt: Date.now(),
-    actions: [],
-  };
   state.markInstalled();
 
   await withAndroidAdbProvider(state.adb, { serial: SERIAL }, async () => {
     await activateAndroidTestIme(ANDROID_EMULATOR, { stateDir });
     state.blockImeSetTo(LATIN_IME);
-    await assert.rejects(
-      async () =>
-        await teardownSessionResources({
-          appLog: 'already-settled',
-          session,
-          sessionName: session.name,
-          sessionStore,
-          stateDir,
-        }),
-      /android_ime: Android test IME could not be restored/,
-    );
+    const result = await restoreAndroidTestIme(ANDROID_EMULATOR, { stateDir });
+    assert.equal(result.reason, 'set-failed');
   });
 });
 

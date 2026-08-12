@@ -30,7 +30,11 @@ import {
 } from './session-test-shard-devices.ts';
 import { toReplayTestAttemptOutcome, toReplayTestFinalizeFailure } from './session-test-outcome.ts';
 import type { LeaseRegistry } from '../lease-registry.ts';
-import type { BindDeviceRuntime, BindExactDeviceRuntime } from '../request-runtime-binding.ts';
+import type {
+  BindDeviceRuntime,
+  BindExactDeviceRuntime,
+  InspectDeviceRuntimeFacts,
+} from '../request-runtime-binding.ts';
 import type { ScreenRecordingAdmissionLedger } from '../screen-recording-admission-ledger.ts';
 import type { PlatformRequestScope } from '@agent-device/contracts/platform';
 import {
@@ -127,6 +131,7 @@ export async function handleSessionReplayCommands(params: {
   leaseRegistry: LeaseRegistry;
   invoke: DaemonInvokeFn;
   bindDevice?: BindDeviceRuntime;
+  inspectFacts?: InspectDeviceRuntimeFacts;
   bindExactDevice?: BindExactDeviceRuntime;
   screenRecordingAdmissionLedger?: ScreenRecordingAdmissionLedger;
   requestScope?: PlatformRequestScope;
@@ -292,6 +297,8 @@ export async function handleSessionReplayCommands(params: {
           logPath,
           sessionStore,
           leaseRegistry,
+          inspectFacts: params.inspectFacts,
+          bindDevice: params.bindDevice,
         });
       },
     });

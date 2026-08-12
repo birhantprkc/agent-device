@@ -117,7 +117,19 @@ type NamedOperationCutover = DeviceRuntimeBase &
 type PatternOperationCutover = DeviceRuntimeBase &
   Readonly<{
     operations: Readonly<{ names?: undefined; pattern: RegExp }>;
-    singularExecution: Readonly<{ routes: NonEmpty<string>; operations?: undefined }>;
+    singularExecution:
+      | Readonly<{
+          routes: NonEmpty<string>;
+          routeProof?: undefined;
+          operations?: undefined;
+          operationOwners?: undefined;
+        }>
+      | Readonly<{
+          routes?: undefined;
+          routeProof: CutoverCheck;
+          operations?: undefined;
+          operationOwners?: undefined;
+        }>;
   }>;
 
 /**
@@ -154,6 +166,25 @@ const RETIREMENT_FORMS = [
  * Reads defensively: a row that omits whole claim objects is exactly the input this
  * rejects, so it must not depend on them being present.
  */
+/**
+ * Rule ids name a row in the layering report, so two rows sharing one id silently merge their
+ * violations under a single heading. Sibling stacks that each add rows to this table are the way
+ * that happens, so the table — not the reader — rejects it.
+ */
+export function cutoverTableDefects(table: readonly MigratedCommandCutover[]): string[] {
+  const byRule = new Map<string, string[]>();
+  for (const row of table) {
+    const commands = byRule.get(row.rule);
+    if (commands) commands.push(row.command);
+    else byRule.set(row.rule, [row.command]);
+  }
+  return [...byRule.entries()]
+    .filter(([, commands]) => commands.length > 1)
+    .map(
+      ([rule, commands]) => `rule id ${rule} is claimed by ${sortedUnique(commands).join(', ')}`,
+    );
+}
+
 export function cutoverRowDefects(row: MigratedCommandCutover): string[] {
   const defects: string[] = [];
   if (!hasAnyRetirementForm(row.legacyRetirement)) {
@@ -182,7 +213,10 @@ function executionDefects(row: MigratedCommandCutover): string[] {
   const defects: string[] = [];
   if ((row.runtimeTypeNames?.length ?? 0) === 0) defects.push('declares no runtime type names');
   if (!hasOperationClaim(row.operations)) defects.push('declares no operations');
-  if ((row.singularExecution?.routes?.length ?? 0) === 0) {
+  if (
+    (row.singularExecution?.routes?.length ?? 0) === 0 &&
+    row.singularExecution?.routeProof === undefined
+  ) {
     defects.push('declares no singular daemon route');
   }
   defects.push(...namedOperationDefects(row));

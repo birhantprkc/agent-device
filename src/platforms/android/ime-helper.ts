@@ -1,6 +1,11 @@
 import { AppError } from '@agent-device/kernel/errors';
 import type { DeviceInfo } from '@agent-device/kernel/device';
-import { androidAdbResultError, type AndroidAdbExecutor } from './adb-executor.ts';
+import type { AndroidImeHelperArtifact, AndroidImeHelperManifest } from './ime-helper-types.ts';
+import {
+  androidAdbResultError,
+  type AndroidAdbExecutor,
+  type AndroidAdbProvider,
+} from './adb-executor.ts';
 import {
   readAndroidHelperManifestInteger,
   readAndroidHelperManifestLiteral,
@@ -31,22 +36,17 @@ const ANDROID_IME_HELPER_BROADCAST_TIMEOUT_MS = 10_000;
 const ACTION_INPUT_TEXT_B64 = 'com.callstack.agentdevice.imehelper.ACTION_INPUT_TEXT_B64';
 const ACTION_CLEAR_TEXT = 'com.callstack.agentdevice.imehelper.ACTION_CLEAR_TEXT';
 
-export type AndroidImeHelperManifest = {
-  name: 'android-ime-helper';
-  version: string;
-  assetName: string;
-  sha256: string;
-  packageName: string;
-  versionCode: number;
-  serviceComponent: string;
-  broadcastProtocol: 'android-ime-helper-v1';
-};
+/**
+ * The IME helper this device should use: a provider that ships its own helper supplies it on the
+ * adb provider, exactly as it may for the snapshot helper; otherwise the npm-bundled artifact.
+ */
+export async function selectAndroidImeHelperArtifact(
+  adbProvider: AndroidAdbProvider,
+): Promise<AndroidImeHelperArtifact> {
+  return adbProvider.imeHelperArtifact ?? (await resolveAndroidImeHelperArtifact());
+}
 
-export type AndroidImeHelperArtifact = {
-  apkPath: string;
-  manifest: AndroidImeHelperManifest;
-};
-
+/** The npm-bundled artifact. */
 export async function resolveAndroidImeHelperArtifact(): Promise<AndroidImeHelperArtifact> {
   return await resolveAndroidHelperArtifact({
     helperDirName: 'ime-helper',

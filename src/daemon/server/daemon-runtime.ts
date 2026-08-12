@@ -18,6 +18,8 @@ import { createExpiredProviderLeaseReleaser } from '../provider-lease-expiry.ts'
 import { clearDaemonShutdownReport, writeDaemonShutdownReport } from '../daemon-shutdown-report.ts';
 import { createRequestHandler } from '../request-router.ts';
 import { stopSessionAppLog, teardownSessionResources } from '../session-teardown.ts';
+import { finalizeDaemonSessionApplicationLifecycle } from '../application-lifecycle-recovery.ts';
+import { runtimeHintValues } from '../handlers/session-runtime.ts';
 import { closeDaemonServers } from './server-shutdown.ts';
 import type { DaemonInvokeFn, SessionState } from '../types.ts';
 import { createDaemonIdleReap } from './daemon-idle-reap.ts';
@@ -58,10 +60,6 @@ import { cleanupManagedAgentBrowserOrphans } from '../../platforms/web/agent-bro
 import { getManagedAgentBrowserStatus } from '../../platforms/web/agent-browser-tool.ts';
 import { openWebSessionNames } from '../web-session-names.ts';
 import {
-  listAndroidAdbSerialsQuick,
-  restoreOrphanedAndroidTestImeOnDaemonStartup,
-} from '../../platforms/android/ime-lifecycle.ts';
-import {
   recoverAppLogResourcesAfterDaemonLock,
   type AppLogRecoveryDiagnostic,
 } from '../app-log-resource-recovery.ts';
@@ -90,6 +88,26 @@ export function resolveDaemonSessionTeardownTimeoutMs(session: SessionState): nu
   return DAEMON_SESSION_TEARDOWN_TIMEOUT_MS + SCREEN_RECORDING_SESSION_TEARDOWN_BUDGET_MS;
 }
 
+async function settleDaemonTeardownStep(params: {
+  session: SessionState;
+  stderr: WritableOutput;
+  resource: 'app-log' | 'session' | 'lifecycle';
+  teardown: () => Promise<unknown>;
+}): Promise<boolean> {
+  const { session, stderr, resource, teardown } = params;
+  try {
+    await teardown();
+    return true;
+  } catch (error) {
+    stderr.write(
+      `Daemon ${resource} teardown error (${session.name}): ${
+        error instanceof Error ? error.message : String(error)
+      }\n`,
+    );
+    return false;
+  }
+}
+
 /**
  * Daemon-shutdown teardown of one session: bounded resource cleanup (budget
  * from {@link resolveDaemonSessionTeardownTimeoutMs}, resolved BEFORE cleanup
@@ -103,48 +121,56 @@ export async function teardownDaemonSessionForShutdown(params: {
   sessionStore: SessionStore;
   stateDir?: string;
   stderr: WritableOutput;
+  finalizeApplicationLifecycle?: (session: SessionState) => Promise<void>;
   beforeDelete?: (session: SessionState) => Promise<void>;
   afterSuccessfulTeardown?: (session: SessionState) => Promise<void>;
 }): Promise<void> {
-  const { session, sessionStore, stateDir, stderr, beforeDelete, afterSuccessfulTeardown } = params;
+  const {
+    session,
+    sessionStore,
+    stateDir,
+    stderr,
+    finalizeApplicationLifecycle,
+    beforeDelete,
+    afterSuccessfulTeardown,
+  } = params;
   const sessionName = sessionStore.resolveStoredSessionName(session);
   const timeoutMs = resolveDaemonSessionTeardownTimeoutMs(session);
   // The ownership-fenced app-log side effect must settle while this process
   // still owns the daemon lock. It is intentionally outside the generic
   // teardown race so lock release and runtime shutdown cannot overtake it.
-  const appLogTeardownSucceeded = await stopSessionAppLog({
+
+  const appLogTeardownSucceeded = await settleDaemonTeardownStep({
     session,
-    sessionName,
-    sessionStore,
-  }).then(
-    () => true,
-    (error) => {
-      stderr.write(
-        `Daemon app-log teardown error (${session.name}): ${
-          error instanceof Error ? error.message : String(error)
-        }\n`,
-      );
-      return false;
-    },
-  );
+    stderr,
+    resource: 'app-log',
+    teardown: async () => await stopSessionAppLog({ session, sessionName, sessionStore }),
+  });
   const sessionAfterAppLog = sessionStore.get(sessionName) ?? session;
-  const teardown = teardownSessionResources({
-    appLog: 'already-settled',
-    session: sessionAfterAppLog,
-    sessionName,
-    sessionStore,
-    stateDir,
-  }).then(
-    () => true,
-    (error) => {
-      stderr.write(
-        `Daemon session teardown error (${session.name}): ${
-          error instanceof Error ? error.message : String(error)
-        }\n`,
-      );
-      return false;
-    },
-  );
+  const teardown = (async () => {
+    const genericTeardownSucceeded = await settleDaemonTeardownStep({
+      session,
+      stderr,
+      resource: 'session',
+      teardown: async () =>
+        await teardownSessionResources({
+          appLog: 'already-settled',
+          session: sessionAfterAppLog,
+          sessionName,
+          sessionStore,
+          stateDir,
+        }),
+    });
+    const lifecycleTeardownSucceeded = finalizeApplicationLifecycle
+      ? await settleDaemonTeardownStep({
+          session,
+          stderr,
+          resource: 'lifecycle',
+          teardown: async () => await finalizeApplicationLifecycle(sessionAfterAppLog),
+        })
+      : true;
+    return genericTeardownSucceeded && lifecycleTeardownSucceeded;
+  })();
   const genericTeardownSucceeded = await Promise.race([
     teardown,
     sleep(timeoutMs).then(() => {
@@ -228,6 +254,12 @@ export async function startDaemonRuntime(
       pidPath: sessionStore.resolveAppLogPidPath(sessionId),
     }),
   });
+  const applicationLifecycle = deviceRuntimeGateway.applicationLifecycle;
+  if (!applicationLifecycle) {
+    throw new AppError('COMMAND_FAILED', 'Platform lifecycle gateway is not configured.', {
+      reason: 'runtime-gateway-missing',
+    });
+  }
   const providerRuntimeProviders = createProviderDeviceRuntimeRequestProviders(
     providerDeviceRuntimes,
     { providerRuntimeRequiredIds: DEFAULT_PROVIDER_RUNTIME_REQUIRED_IDS },
@@ -295,8 +327,15 @@ export async function startDaemonRuntime(
     await teardownDaemonSessionForShutdown({
       session,
       sessionStore,
-      stateDir: baseDir,
       stderr,
+      finalizeApplicationLifecycle: async (sessionToFinalize) =>
+        await finalizeDaemonSessionApplicationLifecycle({
+          gateway: deviceRuntimeGateway,
+          scope: createDaemonRecoveryPlatformScope(),
+          session: sessionToFinalize,
+          stateDir: baseDir,
+          runtimeHints: runtimeHintValues(sessionStore.getRuntimeHints(sessionToFinalize.name)),
+        }),
       beforeDelete: async (sessionToFinalize) => {
         await finalizeDaemonSessionLease({
           session: sessionToFinalize,
@@ -435,12 +474,15 @@ export async function startDaemonRuntime(
       onDiagnostic: (diagnostic) => startupAppLogDiagnostics.push(diagnostic),
     });
     await cleanupWebBrowserOrphansForDaemonStartup({ stateDir: baseDir, sessionStore });
-    // Fire-and-forget: gated on a state-dir marker so it only touches adb when a prior run here
-    // actually activated the test IME (never on hosts that don't use it, e.g. the macOS runner).
-    void restoreOrphanedAndroidTestImeOnDaemonStartup({
-      stateDir: baseDir,
-      listSerials: listAndroidAdbSerialsQuick,
-    }).catch(() => {});
+    // Marker-gated lifecycle recovery owns test-IME orphan repair. Its implementation remains
+    // lazy until the marker exists, so a normal daemon startup does not load or probe adb.
+    void applicationLifecycle.recoverStartupResources({ stateDir: baseDir }).catch((error) => {
+      emitDiagnostic({
+        level: 'warn',
+        phase: 'daemon_lifecycle_startup_recovery_failed',
+        data: { error: error instanceof Error ? error.message : String(error) },
+      });
+    });
     const opened = await openDaemonServers();
     servers = opened.servers;
     socketPort = opened.socketPort;
@@ -484,13 +526,10 @@ export async function startDaemonRuntime(
       await emitFatalDiagnostic(shutdownOptions.cause);
     }
     await closeDaemonServers(servers);
-    // Hand healthy simulator runners off to the next daemon before session
-    // teardown gets a chance to kill them; everything left after this
-    // (real devices, unhealthy runners) goes through the normal stop path.
-    const { detachIosSimulatorRunnerSessionsForShutdown, stopAllIosRunnerSessions } =
-      await import('../../platforms/apple/core/runner/runner-client.ts');
+    // Hand healthy simulator runners off before durable session teardown. The lifecycle gateway
+    // later terminates only still-owned generations once all resources have finalized.
     try {
-      await detachIosSimulatorRunnerSessionsForShutdown();
+      await applicationLifecycle.detachForDaemonShutdown();
     } catch {}
     expiredProviderLeaseReleaser.beginShutdown();
     await teardownDaemonSessions();
@@ -520,7 +559,7 @@ export async function startDaemonRuntime(
     await Promise.allSettled(
       providerDeviceRuntimes.map(async (runtime) => await runtime.shutdown()),
     );
-    await stopAllIosRunnerSessions();
+    await applicationLifecycle.finalizeDaemonShutdown();
     // Best effort: stop the PNG worker so an in-flight job cannot delay exit.
     await Promise.race([
       terminatePngWorker().catch(() => {}),

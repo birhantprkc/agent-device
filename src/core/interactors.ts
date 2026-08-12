@@ -23,6 +23,18 @@ export async function getInteractor(
     );
   }
 
+  return await getLocalInteractor(device, runnerContext);
+}
+
+/**
+ * Resolves a local platform interactor after its runtime owner has already been selected.
+ * Lifecycle bindings use this exact-owner path so an ambient provider request scope cannot
+ * redirect a local binding to a provider interactor.
+ */
+export async function getLocalInteractor(
+  device: DeviceInfo,
+  runnerContext: RunnerContext,
+): Promise<Interactor> {
   // Byte-identical replacement for the former per-platform switch: each plugin's
   // `createInteractor` is the SAME lazy dynamic import + factory call the switch
   // arm performed, and `getPlugin` throws the SAME `UNSUPPORTED_PLATFORM` AppError

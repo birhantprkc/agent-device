@@ -62,7 +62,7 @@ export const CONTENTION_RETRY_FILES: readonly ContentionRetryEntry[] = [
     serializedStub: true,
   },
   {
-    file: 'src/daemon/__tests__/runtime-hints.test.ts',
+    file: 'src/__tests__/platform-runtime-runtime-hints.test.ts',
     reason: 'Stubs platform binaries on PATH and spawns them to derive runtime hints.',
     trackingIssue: SUBPROCESS_STUB_ISSUE,
     reviewBy: REVIEW_BY,

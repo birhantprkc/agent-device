@@ -128,7 +128,6 @@ class WebDriverInteractor implements Interactor {
       url?: string;
     },
   ): Promise<void> {
-    this.requireSupport('open');
     if (options?.url) {
       await this.client.executeScript('mobile: deepLink', [{ url: options.url, package: app }]);
       return;
@@ -139,12 +138,10 @@ class WebDriverInteractor implements Interactor {
   }
 
   async openDevice(): Promise<void> {
-    this.requireSupport('open');
     await this.client.executeScript('mobile: activateApp', [{}]);
   }
 
   async close(app: string): Promise<void> {
-    this.requireSupport('close');
     if (!app) return;
     await this.client.terminateApp(app);
   }

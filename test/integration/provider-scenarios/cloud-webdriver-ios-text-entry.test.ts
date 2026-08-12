@@ -227,6 +227,9 @@ async function openCloudIosSession(daemon: ProviderScenarioHarness): Promise<Dev
     meta: leaseMeta(lease.leaseId),
   });
   assertRpcOk(open);
+  // The prepared cloud session chose iOS. This must become an explicit device leaf before the
+  // runtime facts admission; a collapsed record may not borrow support from an owner label.
+  assert.equal(daemon.session()?.device.appleOs, 'ios');
   return lease;
 }
 

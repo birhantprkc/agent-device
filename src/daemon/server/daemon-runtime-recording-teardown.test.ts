@@ -117,7 +117,6 @@ test('daemon shutdown awaits durable recording finalization inside its extended 
   const teardown = teardownDaemonSessionForShutdown({
     session,
     sessionStore,
-    stateDir: root,
     stderr: { write: (chunk) => stderrChunks.push(chunk) },
   });
   await vi.advanceTimersByTimeAsync(10_000);

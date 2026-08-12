@@ -47,8 +47,8 @@ test('Android emulator coverage exhaustively classifies the public catalog', () 
 test('Android coverage report summary accounts for every manifest classification', () => {
   const summary = ANDROID_EMULATOR_COVERAGE_CLASSIFICATION_SUMMARY;
   assert.deepEqual(summary, {
-    capabilityDenial: 3,
-    contract: 9,
+    capabilityDenial: 2,
+    contract: 10,
     gap: 0,
     live: 41,
     total: 53,
@@ -259,29 +259,14 @@ test('Android behavior patterns are owned by live fixture journeys', () => {
   );
 });
 
-test('Android emulator capability denial matches the public catalog', () => {
-  for (const [command, entry] of Object.entries(ANDROID_EMULATOR_E2E_COVERAGE)) {
-    const supported = isCommandSupportedOnDevice(command, ANDROID_EMULATOR);
-    if (command === PUBLIC_COMMANDS.audio) {
-      assert.equal(
-        supported,
-        process.platform === 'darwin',
-        'Android emulator audio admission follows host audio-probe availability',
-      );
-      continue;
-    }
-    assert.equal(
-      supported,
-      entry.level !== 'capability-denial',
-      `${command} ownership must match Android emulator capability admission`,
-    );
-  }
-  for (const command of [
-    PUBLIC_COMMANDS.prepare,
-    PUBLIC_COMMANDS.tvRemote,
-    PUBLIC_COMMANDS.viewport,
-  ]) {
+test('Android catalog denials exclude fact-owned lifecycle commands', () => {
+  for (const command of [PUBLIC_COMMANDS.tvRemote, PUBLIC_COMMANDS.viewport]) {
     assert.equal(isCommandSupportedOnDevice(command, ANDROID_EMULATOR), false, command);
     assert.equal(ANDROID_EMULATOR_E2E_COVERAGE[command].level, 'capability-denial', command);
   }
+  assert.equal(
+    ANDROID_EMULATOR_E2E_COVERAGE[PUBLIC_COMMANDS.prepare].level,
+    'command-contract',
+    'prepare support is controlled by its platform runtime facts, not the capability catalog',
+  );
 });

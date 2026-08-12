@@ -1,22 +1,19 @@
 import { test, expect, vi, beforeEach } from 'vitest';
 import os from 'node:os';
 import path from 'node:path';
-import { SessionStore } from '../../session-store.ts';
-import type { DaemonRequest, DaemonResponse, SessionState } from '../../types.ts';
-import { AppError } from '@agent-device/kernel/errors';
-import { mkdtempForTestSync } from '../../../__tests__/test-utils/tmp-dir.ts';
 
 vi.mock('../../../core/dispatch.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../core/dispatch.ts')>();
   return { ...actual, dispatchCommand: vi.fn(async () => ({})), resolveTargetDevice: vi.fn() };
 });
 vi.mock('../../device-ready.ts', () => ({ ensureDeviceReady: vi.fn(async () => {}) }));
-vi.mock('../../runtime-hints.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../runtime-hints.ts')>();
+vi.mock('../../../platform-runtime-runtime-hints.ts', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('../../../platform-runtime-runtime-hints.ts')>();
   return {
     ...actual,
-    applyRuntimeHintsToApp: vi.fn(async () => {}),
-    clearRuntimeHintsFromApp: vi.fn(async () => {}),
+    applyRuntimeHintValues: vi.fn(async () => {}),
+    clearRuntimeHintValues: vi.fn(async () => {}),
   };
 });
 vi.mock('../../../platforms/apple/core/runner/runner-client.ts', async (importOriginal) => {
@@ -35,12 +32,8 @@ vi.mock('../../../platforms/apple/core/apps.ts', async (importOriginal) => {
     resolveIosApp: vi.fn(async () => 'com.example.demo'),
   };
 });
-vi.mock('../session-device-utils.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../session-device-utils.ts')>();
-  return { ...actual, settleIosSimulator: vi.fn(async () => {}) };
-});
-vi.mock('../session-open-target.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../session-open-target.ts')>();
+vi.mock('../../../platform-runtime-open-target.ts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../platform-runtime-open-target.ts')>();
   return { ...actual, resolveAndroidPackageForOpen: vi.fn(async () => undefined) };
 });
 vi.mock('../../../platforms/android/ime-lifecycle.ts', async (importOriginal) => {
@@ -53,32 +46,28 @@ vi.mock('../../../utils/host-process.ts', async (importOriginal) => {
   return { ...actual, readProcessStartTime: vi.fn(() => 'test-process-start') };
 });
 
-import { handleSessionCommands } from './session-command-harness.ts';
-import { dispatchCommand, resolveTargetDevice } from '../../../core/dispatch.ts';
-import { applyRuntimeHintsToApp, clearRuntimeHintsFromApp } from '../../runtime-hints.ts';
-import { resolveAndroidPackageForOpen } from '../session-open-target.ts';
+import {
+  handleSessionCommands,
+  mockBindDeviceRuntime,
+  mockInspectDeviceRuntimeFacts,
+} from './session-command-harness.ts';
+import { resolveTargetDevice } from '../../../core/dispatch.ts';
+import { applyRuntimeHintValues } from '../../../platform-runtime-runtime-hints.ts';
+import { resolveAndroidPackageForOpen } from '../../../platform-runtime-open-target.ts';
+import { dispatchApplicationLifecycleEffect } from '../../__tests__/application-lifecycle-runtime-fixture.ts';
+import { lifecycleRuntimeFacts } from './application-lifecycle-runtime-harness.ts';
+import {
+  makeAndroidDevice,
+  makeAndroidEmulator,
+  makeAppleSimulator,
+  makeSessionStore,
+  noopInvoke,
+} from './session-open-runtime.fixtures.ts';
 
-const mockDispatch = vi.mocked(dispatchCommand);
+const mockDispatch = vi.mocked(dispatchApplicationLifecycleEffect);
 const mockResolveTargetDevice = vi.mocked(resolveTargetDevice);
-const mockApplyRuntimeHints = vi.mocked(applyRuntimeHintsToApp);
-const mockClearRuntimeHints = vi.mocked(clearRuntimeHintsFromApp);
+const mockApplyRuntimeHints = vi.mocked(applyRuntimeHintValues);
 const mockResolveAndroidPackage = vi.mocked(resolveAndroidPackageForOpen);
-
-const noopInvoke = async (_req: DaemonRequest): Promise<DaemonResponse> => ({ ok: true, data: {} });
-
-function makeSessionStore(): SessionStore {
-  const root = mkdtempForTestSync('agent-device-session-open-runtime-');
-  return new SessionStore(path.join(root, 'sessions'));
-}
-
-function makeSession(name: string, device: SessionState['device']): SessionState {
-  return {
-    name,
-    device,
-    createdAt: Date.now(),
-    actions: [],
-  };
-}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -95,23 +84,17 @@ test('open applies stored runtime launchUrl and reports runtime hints', async ()
     launchUrl: 'myapp://dev-client',
   });
   const dispatchCalls: Array<{ command: string; positionals: string[] }> = [];
-  const runtimeApplyCalls: Array<{ appId?: string; host?: string; port?: number }> = [];
+  const runtimeApplyCalls: Array<{ appId?: string; host?: string; port?: string }> = [];
   const callOrder: string[] = [];
 
-  mockResolveTargetDevice.mockResolvedValue({
-    platform: 'android',
-    id: 'emulator-5554',
-    name: 'Pixel',
-    kind: 'emulator',
-    booted: true,
-  });
+  mockResolveTargetDevice.mockResolvedValue(makeAndroidEmulator());
   mockResolveAndroidPackage.mockResolvedValue('com.example.demo');
-  mockApplyRuntimeHints.mockImplementation(async ({ appId, runtime }) => {
+  mockApplyRuntimeHints.mockImplementation(async ({ appId, values }) => {
     callOrder.push('runtime');
     runtimeApplyCalls.push({
       appId,
-      host: runtime?.metroHost,
-      port: runtime?.metroPort,
+      host: values.metroHost,
+      port: values.metroPort,
     });
   });
   mockDispatch.mockImplementation(async (_device, command, positionals) => {
@@ -135,12 +118,16 @@ test('open applies stored runtime launchUrl and reports runtime hints', async ()
   });
 
   expect(response?.ok).toBe(true);
+  expect(mockInspectDeviceRuntimeFacts).toHaveBeenCalledTimes(1);
+  expect(mockBindDeviceRuntime).toHaveBeenCalledTimes(1);
   expect(mockResolveTargetDevice).toHaveBeenCalledWith(
     { platform: 'android' },
     { appleSimulatorAppTarget: 'Demo' },
   );
   expect(callOrder).toEqual(['runtime', 'dispatch:open', 'dispatch:open']);
-  expect(runtimeApplyCalls).toEqual([{ appId: 'com.example.demo', host: '10.0.0.10', port: 8081 }]);
+  expect(runtimeApplyCalls).toEqual([
+    { appId: 'com.example.demo', host: '10.0.0.10', port: '8081' },
+  ]);
   expect(dispatchCalls).toEqual([
     { command: 'open', positionals: ['Demo'] },
     { command: 'open', positionals: ['myapp://dev-client'] },
@@ -160,6 +147,51 @@ test('open applies stored runtime launchUrl and reports runtime hints', async ()
   }
 });
 
+test('open rejects a false runtime-hints fact before its one implementation bind', async () => {
+  const sessionStore = makeSessionStore();
+  const device = makeAndroidEmulator();
+  mockResolveTargetDevice.mockResolvedValue(device);
+  mockInspectDeviceRuntimeFacts.mockImplementationOnce(async (candidate) => {
+    const facts = lifecycleRuntimeFacts(candidate);
+    return {
+      ...facts,
+      operations: {
+        ...facts.operations,
+        applyRuntimeHints: {
+          available: false as const,
+          reason: 'unsupported-provider-mode' as const,
+          hint: 'Runtime hints are unavailable for this exact provider-owned cell.',
+        },
+      },
+    };
+  });
+
+  const response = await handleSessionCommands({
+    req: {
+      token: 't',
+      session: 'runtime-open-false-fact',
+      command: 'open',
+      positionals: ['Demo'],
+      flags: { platform: 'android' },
+      runtime: { metroHost: '10.0.0.10', metroPort: 8081 },
+    },
+    sessionName: 'runtime-open-false-fact',
+    logPath: path.join(os.tmpdir(), 'daemon.log'),
+    sessionStore,
+    invoke: noopInvoke,
+  });
+
+  expect(response).toMatchObject({
+    ok: false,
+    error: { code: 'UNSUPPORTED_OPERATION', message: 'open is not supported on this device' },
+  });
+  expect(mockInspectDeviceRuntimeFacts).toHaveBeenCalledTimes(1);
+  expect(mockBindDeviceRuntime).not.toHaveBeenCalled();
+  expect(mockApplyRuntimeHints).not.toHaveBeenCalled();
+  expect(mockDispatch).not.toHaveBeenCalled();
+  expect(sessionStore.get('runtime-open-false-fact')).toBeUndefined();
+});
+
 test('open applies launch-only flags only to the direct app launch before runtime launchUrl', async () => {
   const sessionStore = makeSessionStore();
   const launchConsolePath = path.join(os.tmpdir(), 'launch-console.log');
@@ -167,20 +199,14 @@ test('open applies launch-only flags only to the direct app launch before runtim
     command: string;
     positionals: string[];
     launchConsole?: string;
-    launchArgs?: string[];
+    launchArgs?: readonly string[];
   }> = [];
 
   sessionStore.setRuntimeHints('launch-console-runtime', {
     platform: 'ios',
     launchUrl: 'myapp://dev-client',
   });
-  mockResolveTargetDevice.mockResolvedValue({
-    platform: 'apple',
-    id: 'sim-1',
-    name: 'iPhone 15',
-    kind: 'simulator',
-    booted: true,
-  });
+  mockResolveTargetDevice.mockResolvedValue({ ...makeAppleSimulator(), name: 'iPhone 15' });
   mockDispatch.mockImplementation(async (_device, command, positionals, _outPath, context) => {
     dispatchCalls.push({
       command,
@@ -188,7 +214,7 @@ test('open applies launch-only flags only to the direct app launch before runtim
       launchConsole: context?.launchConsole,
       launchArgs: context?.launchArgs,
     });
-    return {};
+    return undefined;
   });
 
   const response = await handleSessionCommands({
@@ -222,323 +248,15 @@ test('open applies launch-only flags only to the direct app launch before runtim
   ]);
 });
 
-test('open runtime payload replaces stored session runtime atomically', async () => {
-  const sessionStore = makeSessionStore();
-  const sessionName = 'runtime-open-inline';
-  sessionStore.setRuntimeHints(sessionName, {
-    platform: 'android',
-    metroHost: '127.0.0.1',
-    metroPort: 9000,
-    launchUrl: 'myapp://stale',
-  });
-
-  const dispatchCalls: Array<{ command: string; positionals: string[] }> = [];
-  const runtimeApplyCalls: Array<{
-    appId?: string;
-    host?: string;
-    port?: number;
-    launchUrl?: string;
-  }> = [];
-
-  mockResolveTargetDevice.mockResolvedValue({
-    platform: 'android',
-    id: 'emulator-5554',
-    name: 'Pixel',
-    kind: 'emulator',
-    booted: true,
-  });
-  mockResolveAndroidPackage.mockResolvedValue('com.example.demo');
-  mockApplyRuntimeHints.mockImplementation(async ({ appId, runtime }) => {
-    runtimeApplyCalls.push({
-      appId,
-      host: runtime?.metroHost,
-      port: runtime?.metroPort,
-      launchUrl: runtime?.launchUrl,
-    });
-  });
-  mockDispatch.mockImplementation(async (_device, command, positionals) => {
-    dispatchCalls.push({ command, positionals });
-    return {};
-  });
-
-  const response = await handleSessionCommands({
-    req: {
-      token: 't',
-      session: sessionName,
-      command: 'open',
-      positionals: ['Demo'],
-      flags: { platform: 'android' },
-      runtime: {
-        metroHost: '10.0.0.10',
-        metroPort: 8081,
-      },
-    },
-    sessionName,
-    logPath: path.join(os.tmpdir(), 'daemon.log'),
-    sessionStore,
-    invoke: noopInvoke,
-  });
-
-  expect(response?.ok).toBe(true);
-  expect(runtimeApplyCalls).toEqual([
-    { appId: 'com.example.demo', host: '10.0.0.10', port: 8081, launchUrl: undefined },
-  ]);
-  expect(dispatchCalls).toEqual([{ command: 'open', positionals: ['Demo'] }]);
-  expect(sessionStore.getRuntimeHints(sessionName)).toEqual({
-    platform: 'android',
-    metroHost: '10.0.0.10',
-    metroPort: 8081,
-    bundleUrl: undefined,
-    launchUrl: undefined,
-  });
-  expect(sessionStore.get(sessionName)?.actions.map((action) => action.command)).toEqual(['open']);
-  expect(sessionStore.get(sessionName)?.actions[0]?.runtime).toEqual({
-    platform: 'android',
-    metroHost: '10.0.0.10',
-    metroPort: 8081,
-    bundleUrl: undefined,
-    launchUrl: undefined,
-  });
-  if (response && response.ok) {
-    expect(response.data?.runtime).toEqual({
-      platform: 'android',
-      metroHost: '10.0.0.10',
-      metroPort: 8081,
-      bundleUrl: undefined,
-      launchUrl: undefined,
-    });
-  }
-});
-
-test('open runtime payload clears stale applied transport hints before launch', async () => {
-  const sessionStore = makeSessionStore();
-  const sessionName = 'runtime-open-clear';
-  sessionStore.setRuntimeHints(sessionName, {
-    platform: 'android',
-    metroHost: '10.0.0.10',
-    metroPort: 8081,
-  });
-  sessionStore.set(sessionName, {
-    ...makeSession(sessionName, {
-      platform: 'android',
-      id: 'emulator-5554',
-      name: 'Pixel',
-      kind: 'emulator',
-      booted: true,
-    }),
-    appBundleId: 'com.example.demo',
-    appName: 'Demo',
-  });
-
-  const callOrder: string[] = [];
-
-  mockResolveAndroidPackage.mockResolvedValue('com.example.demo');
-  mockClearRuntimeHints.mockImplementation(async ({ device, appId }) => {
-    callOrder.push(`clear:${device.id}:${appId}`);
-  });
-  mockApplyRuntimeHints.mockImplementation(async () => {
-    callOrder.push('runtime');
-  });
-  mockDispatch.mockImplementation(async (_device, command, positionals) => {
-    callOrder.push(`dispatch:${command}:${positionals.join('|')}`);
-    return {};
-  });
-
-  const response = await handleSessionCommands({
-    req: {
-      token: 't',
-      session: sessionName,
-      command: 'open',
-      positionals: ['Demo'],
-      flags: {},
-      runtime: {
-        launchUrl: 'myapp://fresh',
-      },
-    },
-    sessionName,
-    logPath: path.join(os.tmpdir(), 'daemon.log'),
-    sessionStore,
-    invoke: noopInvoke,
-  });
-
-  expect(response?.ok).toBe(true);
-  expect(callOrder).toEqual([
-    'clear:emulator-5554:com.example.demo',
-    'runtime',
-    'dispatch:open:Demo',
-    'dispatch:open:myapp://fresh',
-  ]);
-  expect(sessionStore.getRuntimeHints(sessionName)).toEqual({
-    platform: 'android',
-    metroHost: undefined,
-    metroPort: undefined,
-    bundleUrl: undefined,
-    launchUrl: 'myapp://fresh',
-  });
-  if (response && response.ok) {
-    expect(response.data?.runtime).toEqual({
-      platform: 'android',
-      metroHost: undefined,
-      metroPort: undefined,
-      bundleUrl: undefined,
-      launchUrl: 'myapp://fresh',
-    });
-  }
-});
-
-test('open runtime payload rejects invalid metro port before app launch', async () => {
-  const sessionStore = makeSessionStore();
-  let dispatchCalls = 0;
-
-  mockResolveTargetDevice.mockResolvedValue({
-    platform: 'android',
-    id: 'emulator-5554',
-    name: 'Pixel',
-    kind: 'emulator',
-    booted: true,
-  });
-  mockDispatch.mockImplementation(async () => {
-    dispatchCalls += 1;
-    return {};
-  });
-
-  const response = await handleSessionCommands({
-    req: {
-      token: 't',
-      session: 'runtime-open-invalid-port',
-      command: 'open',
-      positionals: ['Demo'],
-      flags: { platform: 'android' },
-      runtime: {
-        metroHost: '10.0.0.10',
-        metroPort: 70000,
-      },
-    },
-    sessionName: 'runtime-open-invalid-port',
-    logPath: path.join(os.tmpdir(), 'daemon.log'),
-    sessionStore,
-    invoke: noopInvoke,
-  });
-
-  expect(response).toBeTruthy();
-  expect(response?.ok).toBe(false);
-  if (response && !response.ok) {
-    expect(response.error.code).toBe('INVALID_ARGS');
-    expect(response.error.message).toBe(
-      'Invalid runtime metroPort: 70000. Use an integer between 1 and 65535.',
-    );
-  }
-  expect(dispatchCalls).toBe(0);
-});
-
-test('open runtime payload rejects malformed runtime objects without mutating session state', async () => {
-  const sessionStore = makeSessionStore();
-  const sessionName = 'runtime-open-malformed';
-  sessionStore.setRuntimeHints(sessionName, {
-    platform: 'android',
-    metroHost: '10.0.0.10',
-    metroPort: 8081,
-  });
-
-  mockResolveTargetDevice.mockResolvedValue({
-    platform: 'android',
-    id: 'emulator-5554',
-    name: 'Pixel',
-    kind: 'emulator',
-    booted: true,
-  });
-
-  const response = await handleSessionCommands({
-    req: {
-      token: 't',
-      session: sessionName,
-      command: 'open',
-      positionals: ['Demo'],
-      flags: { platform: 'android' },
-      runtime: 'not-an-object' as unknown as DaemonRequest['runtime'],
-    },
-    sessionName,
-    logPath: path.join(os.tmpdir(), 'daemon.log'),
-    sessionStore,
-    invoke: noopInvoke,
-  });
-
-  expect(response).toBeTruthy();
-  expect(response?.ok).toBe(false);
-  if (response && !response.ok) {
-    expect(response.error.code).toBe('INVALID_ARGS');
-    expect(response.error.message).toBe('open runtime must be an object.');
-  }
-  expect(sessionStore.getRuntimeHints(sessionName)).toEqual({
-    platform: 'android',
-    metroHost: '10.0.0.10',
-    metroPort: 8081,
-  });
-});
-
-test('open runtime payload does not persist replacement when launch fails', async () => {
-  const sessionStore = makeSessionStore();
-  const sessionName = 'runtime-open-launch-fails';
-  sessionStore.setRuntimeHints(sessionName, {
-    platform: 'android',
-    metroHost: '10.0.0.10',
-    metroPort: 8081,
-    launchUrl: 'myapp://stale',
-  });
-
-  mockResolveTargetDevice.mockResolvedValue({
-    platform: 'android',
-    id: 'emulator-5554',
-    name: 'Pixel',
-    kind: 'emulator',
-    booted: true,
-  });
-  mockApplyRuntimeHints.mockResolvedValue(undefined);
-  mockDispatch.mockRejectedValue(new AppError('COMMAND_FAILED', 'launch failed'));
-
-  await expect(
-    handleSessionCommands({
-      req: {
-        token: 't',
-        session: sessionName,
-        command: 'open',
-        positionals: ['Demo'],
-        flags: { platform: 'android' },
-        runtime: {
-          metroHost: '127.0.0.1',
-          metroPort: 9090,
-        },
-      },
-      sessionName,
-      logPath: path.join(os.tmpdir(), 'daemon.log'),
-      sessionStore,
-      invoke: noopInvoke,
-    }),
-  ).rejects.toThrow(expect.objectContaining({ code: 'COMMAND_FAILED', message: 'launch failed' }));
-
-  expect(sessionStore.getRuntimeHints(sessionName)).toEqual({
-    platform: 'android',
-    metroHost: '10.0.0.10',
-    metroPort: 8081,
-    launchUrl: 'myapp://stale',
-  });
-});
-
 test('open --metro-port alone defaults the host to 10.0.2.2 on an Android emulator', async () => {
   const sessionStore = makeSessionStore();
   const sessionName = 'runtime-open-port-only-android';
-  const runtimeApplyCalls: Array<{ host?: string; port?: number }> = [];
+  const runtimeApplyCalls: Array<{ host?: string; port?: string }> = [];
 
-  mockResolveTargetDevice.mockResolvedValue({
-    platform: 'android',
-    id: 'emulator-5556',
-    name: 'Pixel',
-    kind: 'emulator',
-    booted: true,
-  });
+  mockResolveTargetDevice.mockResolvedValue(makeAndroidEmulator('emulator-5556'));
   mockResolveAndroidPackage.mockResolvedValue('com.example.demo');
-  mockApplyRuntimeHints.mockImplementation(async ({ runtime }) => {
-    runtimeApplyCalls.push({ host: runtime?.metroHost, port: runtime?.metroPort });
+  mockApplyRuntimeHints.mockImplementation(async ({ values }) => {
+    runtimeApplyCalls.push({ host: values.metroHost, port: values.metroPort });
   });
 
   const response = await handleSessionCommands({
@@ -557,7 +275,7 @@ test('open --metro-port alone defaults the host to 10.0.2.2 on an Android emulat
   });
 
   expect(response?.ok).toBe(true);
-  expect(runtimeApplyCalls).toEqual([{ host: '10.0.2.2', port: 8084 }]);
+  expect(runtimeApplyCalls).toEqual([{ host: '10.0.2.2', port: '8084' }]);
   expect(sessionStore.getRuntimeHints(sessionName)?.metroHost).toBe('10.0.2.2');
   expect(sessionStore.getRuntimeHints(sessionName)?.metroPort).toBe(8084);
 });
@@ -565,17 +283,11 @@ test('open --metro-port alone defaults the host to 10.0.2.2 on an Android emulat
 test('open --metro-port alone defaults the host to 127.0.0.1 on an iOS simulator', async () => {
   const sessionStore = makeSessionStore();
   const sessionName = 'runtime-open-port-only-ios';
-  const runtimeApplyCalls: Array<{ host?: string; port?: number }> = [];
+  const runtimeApplyCalls: Array<{ host?: string; port?: string }> = [];
 
-  mockResolveTargetDevice.mockResolvedValue({
-    platform: 'apple',
-    id: 'sim-1',
-    name: 'iPhone 17 Pro',
-    kind: 'simulator',
-    booted: true,
-  });
-  mockApplyRuntimeHints.mockImplementation(async ({ runtime }) => {
-    runtimeApplyCalls.push({ host: runtime?.metroHost, port: runtime?.metroPort });
+  mockResolveTargetDevice.mockResolvedValue(makeAppleSimulator());
+  mockApplyRuntimeHints.mockImplementation(async ({ values }) => {
+    runtimeApplyCalls.push({ host: values.metroHost, port: values.metroPort });
   });
 
   const response = await handleSessionCommands({
@@ -594,25 +306,19 @@ test('open --metro-port alone defaults the host to 127.0.0.1 on an iOS simulator
   });
 
   expect(response?.ok).toBe(true);
-  expect(runtimeApplyCalls).toEqual([{ host: '127.0.0.1', port: 8084 }]);
+  expect(runtimeApplyCalls).toEqual([{ host: '127.0.0.1', port: '8084' }]);
   expect(sessionStore.getRuntimeHints(sessionName)?.metroHost).toBe('127.0.0.1');
 });
 
 test('open --metro-port alone stays host-ambiguous on a physical Android device', async () => {
   const sessionStore = makeSessionStore();
   const sessionName = 'runtime-open-port-only-physical';
-  const runtimeApplyCalls: Array<{ host?: string; port?: number }> = [];
+  const runtimeApplyCalls: Array<{ host?: string; port?: string }> = [];
 
-  mockResolveTargetDevice.mockResolvedValue({
-    platform: 'android',
-    id: 'R5CN30',
-    name: 'Galaxy',
-    kind: 'device',
-    booted: true,
-  });
+  mockResolveTargetDevice.mockResolvedValue(makeAndroidDevice());
   mockResolveAndroidPackage.mockResolvedValue('com.example.demo');
-  mockApplyRuntimeHints.mockImplementation(async ({ runtime }) => {
-    runtimeApplyCalls.push({ host: runtime?.metroHost, port: runtime?.metroPort });
+  mockApplyRuntimeHints.mockImplementation(async ({ values }) => {
+    runtimeApplyCalls.push({ host: values.metroHost, port: values.metroPort });
   });
 
   const response = await handleSessionCommands({
@@ -631,7 +337,7 @@ test('open --metro-port alone stays host-ambiguous on a physical Android device'
   });
 
   expect(response?.ok).toBe(true);
-  expect(runtimeApplyCalls).toEqual([{ host: undefined, port: 8084 }]);
+  expect(runtimeApplyCalls).toEqual([{ host: undefined, port: '8084' }]);
   expect(sessionStore.getRuntimeHints(sessionName)?.metroHost).toBeUndefined();
   expect(sessionStore.getRuntimeHints(sessionName)?.metroPort).toBe(8084);
 });
@@ -640,13 +346,7 @@ test('open --relaunch allows Android package names ending with apk-like suffix',
   const sessionStore = makeSessionStore();
   const dispatchCalls: Array<{ command: string; positionals: string[] }> = [];
 
-  mockResolveTargetDevice.mockResolvedValue({
-    platform: 'android',
-    id: 'emulator-5554',
-    name: 'Pixel',
-    kind: 'emulator',
-    booted: true,
-  });
+  mockResolveTargetDevice.mockResolvedValue(makeAndroidEmulator());
   mockDispatch.mockImplementation(async (_device, command, positionals) => {
     dispatchCalls.push({ command, positionals });
     return {};

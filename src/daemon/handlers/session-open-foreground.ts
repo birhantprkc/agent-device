@@ -1,5 +1,4 @@
 import { normalizeError, type NormalizedError } from '@agent-device/kernel/errors';
-import { resolveSoleForegroundIosApp } from '../ios-app-session-hint.ts';
 import { dispatchSnapshotViaRuntime } from '../snapshot-runtime.ts';
 import type { SessionStore } from '../session-store.ts';
 import type { DaemonRequest, DaemonResponse } from '../types.ts';
@@ -21,18 +20,9 @@ export type ForegroundOpenResolution =
  * (`open <app> --foreground`) the cheap path for harnesses and other callers that already
  * know the foreground bundle.
  *
- * Without an app argument, this auto-resolves the target via
- * `resolveSoleForegroundIosApp` — the exact same ambiguity-detection probe that enriches
- * the SESSION_NOT_FOUND hint — and rewrites the request's positionals/flags so the rest
- * of `handleOpenCommand`'s existing new-session flow runs unmodified against the resolved
- * device + bundle id. Only iOS simulators are handled; see the PR body for scoped-out
- * platforms.
- *
- * Fails closed with AMBIGUOUS_MATCH — never guesses — when the environment is not
- * unambiguous: zero or multiple booted simulators, zero or multiple running apps, or a
- * probe failure (the resolver owns the catch-all and reports failure as `undefined`,
- * never a rejection). This mirrors `buildIosOpenCommandHint`'s no-guessing contract
- * exactly, because it is built from the same underlying probe.
+ * Without an app argument, this module validates request policy and narrows device selection to
+ * iOS. The admitted Apple lifecycle binding performs the foreground probe later, after its one
+ * facts admission and one bind; no local app-resolution branch may run before ownership exists.
  */
 export async function resolveForegroundOpenRequest(params: {
   req: DaemonRequest;
@@ -78,29 +68,11 @@ export async function resolveForegroundOpenRequest(params: {
     };
   }
 
-  const resolved = await resolveSoleForegroundIosApp({
-    simulatorSetPath: req.flags?.iosSimulatorDeviceSet,
-  });
-  if (!resolved) {
-    return {
-      type: 'response',
-      response: errorResponse(
-        'AMBIGUOUS_MATCH',
-        'open --foreground requires an unambiguous environment: exactly one booted iOS simulator with exactly one app running.',
-        {
-          reason: 'foreground_app_ambiguous',
-          hint: 'Pass an explicit app instead: agent-device open <app> --platform ios.',
-        },
-      ),
-    };
-  }
-
   return {
     type: 'resolved',
     req: {
       ...req,
-      positionals: [resolved.app.bundleId],
-      flags: { ...req.flags, udid: resolved.device.id, platform: 'ios' },
+      flags: { ...req.flags, platform: 'ios' },
     },
   };
 }
