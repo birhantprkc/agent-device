@@ -71,6 +71,7 @@ function createAdmissionFacts(
       ensureReady: options.readinessAvailable ? available : appsFact,
       bootTarget: unavailable,
       bootTargetHeadless: unavailable,
+      shutdownTarget: unavailable,
       listApps: appsFact,
     },
   };

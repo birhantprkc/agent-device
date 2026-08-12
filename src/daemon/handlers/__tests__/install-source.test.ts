@@ -359,6 +359,7 @@ function sourceRuntimeFacts(
       ensureReady: readinessAvailable ? { available: true } : unavailable,
       bootTarget: unavailable,
       bootTargetHeadless: unavailable,
+      shutdownTarget: unavailable,
     },
   };
 }

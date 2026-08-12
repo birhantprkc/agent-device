@@ -45,8 +45,8 @@ test('builds one complete combined unavailable owner without fake operations', a
     'screenRecordingCleanup',
     'screenRecordingReattach',
     'screenRecordingStart',
-    'shutdownTarget',
     'sendPushNotification',
+    'shutdownTarget',
   ]);
   assert.deepEqual(binding.operations, {});
   await binding[Symbol.asyncDispose]();

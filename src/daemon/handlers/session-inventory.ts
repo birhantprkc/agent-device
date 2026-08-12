@@ -235,7 +235,7 @@ async function capabilitiesInventoryResponse(params: {
                 : command === PUBLIC_COMMANDS.appState
                   ? sessionOwnedAppStateAvailable || isAppStateRuntimeAvailable(facts)
                   : command === PUBLIC_COMMANDS.shutdown
-                    ? facts?.operations.shutdownTarget.available === true
+                    ? facts?.operations.shutdownTarget?.available === true
                     : (installFamilyCapabilityAvailable(command, facts) ??
                       isCommandSupportedOnDevice(command, device)),
       ),
