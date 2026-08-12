@@ -195,6 +195,7 @@ function webDriverFacts(
         bootTarget: inactiveSession,
         bootTargetHeadless: inactiveSession,
         listApps: inactiveSession,
+        shutdownTarget: inactiveSession,
       },
     });
   }

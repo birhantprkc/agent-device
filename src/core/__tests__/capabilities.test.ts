@@ -371,15 +371,7 @@ test('Linux supports desktop interaction commands and blocks mobile/unsupported 
     [{ device: linuxDevice, expected: true, label: 'on Linux' }],
   );
   assertCommandSupport(
-    [
-      'alert',
-      'app-switcher',
-      'keyboard',
-      'perf',
-      'orientation',
-      'settings',
-      'trigger-app-event',
-    ],
+    ['alert', 'app-switcher', 'keyboard', 'perf', 'orientation', 'settings', 'trigger-app-event'],
     [{ device: linuxDevice, expected: false, label: 'on Linux' }],
   );
 });
