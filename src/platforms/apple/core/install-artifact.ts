@@ -70,7 +70,7 @@ async function prepareIosInstallArtifactInScope(
   try {
     resolved = await resolveIosInstallablePath(materialized.installablePath, options);
     const resolvedInstallable = resolved;
-    const bundleInfo = await readIosBundleInfo(resolvedInstallable.installPath);
+    const bundleInfo = await readIosBundleInfo(resolvedInstallable.installPath, options?.signal);
     const archivePath =
       materialized.archivePath ??
       (materialized.installablePath.toLowerCase().endsWith('.ipa')
@@ -99,12 +99,13 @@ async function prepareIosInstallArtifactInScope(
 
 export async function readIosBundleInfo(
   appBundlePath: string,
+  signal?: AbortSignal,
 ): Promise<{ bundleId?: string; appName?: string }> {
   const infoPlistPath = path.join(appBundlePath, 'Info.plist');
   const [bundleId, displayName, bundleName] = await Promise.all([
-    readInfoPlistString(infoPlistPath, 'CFBundleIdentifier'),
-    readInfoPlistString(infoPlistPath, 'CFBundleDisplayName'),
-    readInfoPlistString(infoPlistPath, 'CFBundleName'),
+    readInfoPlistString(infoPlistPath, 'CFBundleIdentifier', signal),
+    readInfoPlistString(infoPlistPath, 'CFBundleDisplayName', signal),
+    readInfoPlistString(infoPlistPath, 'CFBundleName', signal),
   ]);
   return {
     bundleId,
@@ -120,6 +121,13 @@ async function resolveIosInstallablePath(
     return { installPath: appPath, cleanup: async () => {} };
   }
 
+  return await resolveIosIpaInstallablePath(appPath, options);
+}
+
+async function resolveIosIpaInstallablePath(
+  appPath: string,
+  options?: InstallIosArtifactOptions,
+): Promise<{ installPath: string; cleanup: () => Promise<void> }> {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-device-ios-ipa-'));
   const cleanup = async () => {
     await fs.rm(tempDir, { recursive: true, force: true });
@@ -134,6 +142,7 @@ async function resolveIosInstallablePath(
       type: 'zip',
       budget,
       depth,
+      signal: options?.signal,
     });
     noteInstallArtifactArchiveDepth(depth);
     const payloadDir = path.join(outputRoot, 'Payload');
@@ -157,7 +166,7 @@ async function resolveIosInstallablePath(
       );
     }
 
-    await ensureIosPayloadBundleDetails(appBundles);
+    await ensureIosPayloadBundleDetails(appBundles, options?.signal);
     const hint = options?.appIdentifierHint?.trim();
     if (hint) {
       const resolved = resolveIosPayloadBundleByHint(appBundles, hint);
@@ -178,11 +187,14 @@ async function resolveIosInstallablePath(
   }
 }
 
-async function ensureIosPayloadBundleDetails(bundles: IosPayloadAppBundle[]): Promise<void> {
+async function ensureIosPayloadBundleDetails(
+  bundles: IosPayloadAppBundle[],
+  signal?: AbortSignal,
+): Promise<void> {
   await Promise.all(
     bundles.map(async (bundle) => {
       if (bundle.bundleId && bundle.appName) return;
-      const bundleInfo = await readIosBundleInfo(bundle.installPath);
+      const bundleInfo = await readIosBundleInfo(bundle.installPath, signal);
       bundle.bundleId = bundle.bundleId ?? bundleInfo.bundleId;
       bundle.appName = bundle.appName ?? bundleInfo.appName;
     }),

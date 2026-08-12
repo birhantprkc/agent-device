@@ -6,14 +6,16 @@ import { visitXmlPlistEntries } from './plist-xml.ts';
 export async function readInfoPlistString(
   infoPlistPath: string,
   key: string,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   try {
-    const plist = await readApplePlistJson(infoPlistPath);
+    const plist = await readApplePlistJson(infoPlistPath, signal);
     const value = plist?.[key];
     if (typeof value === 'string' && value.length > 0) {
       return value;
     }
   } catch {
+    signal?.throwIfAborted();
     // Fall through to XML parsing for non-Darwin environments without plist tooling.
   }
 
@@ -23,6 +25,7 @@ export async function readInfoPlistString(
       ['-extract', key, 'raw', '-o', '-', infoPlistPath],
       {
         allowFailure: true,
+        signal,
       },
     );
     if (result.exitCode === 0) {
@@ -32,13 +35,15 @@ export async function readInfoPlistString(
       }
     }
   } catch {
+    signal?.throwIfAborted();
     // Fall through to XML parsing for non-Darwin environments without plutil.
   }
 
   try {
-    const plist = await fs.readFile(infoPlistPath, 'utf8');
+    const plist = await fs.readFile(infoPlistPath, { encoding: 'utf8', signal });
     return readXmlPlistString(plist, key);
   } catch {
+    signal?.throwIfAborted();
     return undefined;
   }
 }

@@ -46,7 +46,8 @@ const localAppleToolProvider: AppleToolProvider = {
     run: async (args, options) => await runCmd('xcrun', ['devicectl', ...args], options),
   },
   plist: {
-    readJson: async (plistPath) => await readPlistJsonWithCommand(runCmd, plistPath),
+    readJson: async (plistPath, signal) =>
+      await readPlistJsonWithCommand(runCmd, plistPath, signal),
   },
   macosHost: createLocalAppleMacOsHostProvider(
     runCmd,
@@ -68,8 +69,8 @@ export function createLocalAppleToolProvider(
     ...provider,
   };
   const plist = provider.plist ?? {
-    readJson: async (plistPath: string) =>
-      await readPlistJsonWithCommand(merged.runCommand, plistPath),
+    readJson: async (plistPath: string, signal?: AbortSignal) =>
+      await readPlistJsonWithCommand(merged.runCommand, plistPath, signal),
   };
   return {
     ...merged,
@@ -129,8 +130,9 @@ export async function runXcrun(args: string[], options?: ExecOptions): Promise<E
 
 export async function readApplePlistJson(
   plistPath: string,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown> | null> {
-  return (await resolveAppleToolProvider().plist?.readJson(plistPath)) ?? null;
+  return (await resolveAppleToolProvider().plist?.readJson(plistPath, signal)) ?? null;
 }
 
 function normalizeAppleToolProvider(provider: AppleToolProvider): AppleToolProvider {
@@ -156,16 +158,19 @@ function coerceRun(run: AppleToolSubcommandExecutor): AppleToolSubcommandExecuto
 async function readPlistJsonWithCommand(
   runCommand: AppleToolCommandExecutor,
   plistPath: string,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown> | null> {
   try {
     const result = await runCommand('plutil', ['-convert', 'json', '-o', '-', plistPath], {
       allowFailure: true,
+      signal,
     });
     if (result.exitCode !== 0 || !result.stdout.trim()) {
       return null;
     }
     return JSON.parse(result.stdout) as Record<string, unknown>;
   } catch {
+    signal?.throwIfAborted();
     return null;
   }
 }

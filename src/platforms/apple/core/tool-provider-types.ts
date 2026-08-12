@@ -24,7 +24,7 @@ export type AppleMacOsHelperProvider = {
 };
 
 export type ApplePlistProvider = {
-  readJson(path: string): Promise<Record<string, unknown> | null>;
+  readJson(path: string, signal?: AbortSignal): Promise<Record<string, unknown> | null>;
 };
 
 export type AppleMacOsHostProvider = {

@@ -16,27 +16,34 @@ let aaptPathCache: string | null | undefined;
 
 export async function resolveAndroidArchivePackageName(
   archivePath: string,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
   for (const entry of ['AndroidManifest.xml', 'base/manifest/AndroidManifest.xml']) {
-    const manifest = await readZipEntry(archivePath, entry);
+    const manifest = await readZipEntry(archivePath, entry, signal);
     if (!manifest) continue;
     const packageName = parseAndroidManifestPackageName(manifest);
     if (packageName) return packageName;
   }
-  return await resolveAndroidArchivePackageNameWithAapt(archivePath);
+  return await resolveAndroidArchivePackageNameWithAapt(archivePath, signal);
 }
 
-async function readZipEntry(archivePath: string, entry: string): Promise<Buffer | undefined> {
+async function readZipEntry(
+  archivePath: string,
+  entry: string,
+  signal?: AbortSignal,
+): Promise<Buffer | undefined> {
   try {
     const result = await runCmd('unzip', ['-p', archivePath, entry], {
       allowFailure: true,
       binaryStdout: true,
+      signal,
     });
     if (result.exitCode !== 0 || !result.stdoutBuffer || result.stdoutBuffer.length === 0) {
       return undefined;
     }
     return result.stdoutBuffer;
   } catch {
+    signal?.throwIfAborted();
     return undefined;
   }
 }
@@ -173,10 +180,15 @@ function readLength16(chunk: Buffer, offset: number): [number, number] {
 
 async function resolveAndroidArchivePackageNameWithAapt(
   archivePath: string,
+  signal?: AbortSignal,
 ): Promise<string | undefined> {
+  signal?.throwIfAborted();
   const aaptPath = await resolveAaptPath();
   if (!aaptPath) return undefined;
-  const result = await runCmd(aaptPath, ['dump', 'badging', archivePath], { allowFailure: true });
+  const result = await runCmd(aaptPath, ['dump', 'badging', archivePath], {
+    allowFailure: true,
+    signal,
+  });
   if (result.exitCode !== 0) return undefined;
   const match = result.stdout.match(/package:\s+name='([^']+)'/);
   return match?.[1];

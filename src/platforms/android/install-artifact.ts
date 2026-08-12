@@ -30,7 +30,7 @@ export async function prepareAndroidInstallArtifact(
     const identity =
       options?.resolveIdentity === false
         ? {}
-        : await inspectAndroidArtifactIdentity(materialized.installablePath);
+        : await inspectAndroidArtifactIdentity(materialized.installablePath, options?.signal);
     return {
       archivePath: materialized.archivePath,
       installablePath: materialized.installablePath,
@@ -50,12 +50,13 @@ function isAndroidInstallablePath(candidatePath: string): boolean {
 
 async function inspectAndroidArtifactIdentity(
   installablePath: string,
+  signal?: AbortSignal,
 ): Promise<{ packageName?: string }> {
   const extension = path.extname(installablePath).toLowerCase();
   if (extension !== '.apk' && extension !== '.aab') {
     return {};
   }
-  const packageName = await manifest.resolveAndroidArchivePackageName(installablePath);
+  const packageName = await manifest.resolveAndroidArchivePackageName(installablePath, signal);
   return {
     packageName,
   };

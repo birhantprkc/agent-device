@@ -19,19 +19,22 @@ type TarOptions = {
   gzip: boolean;
   budget?: ArchiveBudget;
   depth?: number;
+  signal?: AbortSignal;
   validateManifest?: (manifest: readonly ArchiveManifestEntry[]) => void | Promise<void>;
 };
 
 export async function extractTarArchive(options: TarOptions): Promise<void> {
+  options.signal?.throwIfAborted();
   const budget = options.budget ?? new ArchiveBudget();
   const depth = options.depth ?? 1;
   const manifest = await inspectTar(options, budget, depth);
   await options.validateManifest?.(manifest);
   const reservation = reserveArchiveManifest(budget, depth, manifest);
   const extractor = tar.extract();
-  const extraction = streamTar(options.archivePath, options.gzip, extractor);
+  const extraction = streamTar(options.archivePath, options.gzip, extractor, options.signal);
   try {
     for await (const entry of extractor) {
+      options.signal?.throwIfAborted();
       const actualEntry = manifestEntryFromTarHeader(entry.header);
       if (!actualEntry) {
         await drainTarEntry(entry);
@@ -67,9 +70,10 @@ async function inspectTar(
   const manifest: ArchiveManifestEntry[] = [];
   let declaredBytes = 0;
   const extractor = tar.extract();
-  const inspection = streamTar(options.archivePath, options.gzip, extractor);
+  const inspection = streamTar(options.archivePath, options.gzip, extractor, options.signal);
   try {
     for await (const entry of extractor) {
+      options.signal?.throwIfAborted();
       const manifestEntry = manifestEntryFromTarHeader(entry.header);
       if (!manifestEntry) {
         await drainTarEntry(entry);
@@ -93,10 +97,15 @@ async function inspectTar(
   return manifest;
 }
 
-function streamTar(archivePath: string, gzip: boolean, extractor: tar.Extract): Promise<void> {
+function streamTar(
+  archivePath: string,
+  gzip: boolean,
+  extractor: tar.Extract,
+  signal?: AbortSignal,
+): Promise<void> {
   return gzip
-    ? pipeline(createReadStream(archivePath), createGunzip(), extractor)
-    : pipeline(createReadStream(archivePath), extractor);
+    ? pipeline(createReadStream(archivePath), createGunzip(), extractor, { signal })
+    : pipeline(createReadStream(archivePath), extractor, { signal });
 }
 
 function readTarKind(type: tar.Headers['type']): 'directory' | 'file' {

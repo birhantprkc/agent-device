@@ -17,15 +17,17 @@ type ZipOptions = {
   outputRoot: string;
   budget?: ArchiveBudget;
   depth?: number;
+  signal?: AbortSignal;
   validateManifest?: (manifest: readonly ArchiveManifestEntry[]) => void | Promise<void>;
 };
 
 export async function extractZipArchive(options: ZipOptions): Promise<void> {
+  options.signal?.throwIfAborted();
   const budget = options.budget ?? new ArchiveBudget();
   const depth = options.depth ?? 1;
   const manifest: ArchiveManifestEntry[] = [];
   let declaredBytes = 0;
-  await readZipEntries(options.archivePath, (entry) => {
+  await readZipEntries(options.archivePath, options.signal, (entry) => {
     budget.preflightArchive({
       depth,
       entryCount: manifest.length + 1,
@@ -42,13 +44,14 @@ export async function extractZipArchive(options: ZipOptions): Promise<void> {
   });
   await options.validateManifest?.(manifest);
   const reservation = reserveArchiveManifest(budget, depth, manifest);
-  const entries = await readZipEntries(options.archivePath, (_entry, index) => {
+  const entries = await readZipEntries(options.archivePath, options.signal, (_entry, index) => {
     if (index >= manifest.length) mismatch();
   });
   if (entries.length !== manifest.length) mismatch();
   const zipFile = await openZip(options.archivePath);
   try {
     for (let index = 0; index < entries.length; index += 1) {
+      options.signal?.throwIfAborted();
       const entry = entries[index];
       const expected = manifest[index];
       if (!entry || !expected || !sameArchiveManifestEntry(toManifestEntry(entry), expected)) {
@@ -69,6 +72,7 @@ export async function extractZipArchive(options: ZipOptions): Promise<void> {
             }
           },
           createWriteStream(outputPath, { flags: 'wx', mode: expected.mode }),
+          { signal: options.signal },
         );
       }
       reservation.commitEntry();
@@ -81,6 +85,7 @@ export async function extractZipArchive(options: ZipOptions): Promise<void> {
 
 async function readZipEntries(
   archivePath: string,
+  signal?: AbortSignal,
   inspect?: (entry: yauzl.Entry, index: number) => void,
 ): Promise<yauzl.Entry[]> {
   const zipFile = await openZip(archivePath);
@@ -90,6 +95,7 @@ async function readZipEntries(
       zipFile.off('entry', onEntry);
       zipFile.off('end', onEnd);
       zipFile.off('error', onError);
+      signal?.removeEventListener('abort', onAbort);
     };
     const onEntry = (entry: yauzl.Entry): void => {
       try {
@@ -109,9 +115,16 @@ async function readZipEntries(
       cleanup();
       reject(error);
     };
+    const onAbort = (): void => {
+      cleanup();
+      zipFile.close();
+      reject(signal?.reason ?? new DOMException('The operation was aborted', 'AbortError'));
+    };
     zipFile.on('entry', onEntry);
     zipFile.once('end', onEnd);
     zipFile.once('error', onError);
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) return onAbort();
     zipFile.readEntry();
   }).finally(() => zipFile.close());
 }

@@ -12,10 +12,12 @@ export type ExtractArchiveOptions = {
   type: SupportedArchiveType;
   budget?: ArchiveBudget;
   depth?: number;
+  signal?: AbortSignal;
   validateManifest?: (manifest: readonly ArchiveManifestEntry[]) => void | Promise<void>;
 };
 
 export async function extractArchiveSafely(options: ExtractArchiveOptions): Promise<void> {
+  options.signal?.throwIfAborted();
   const archivePath = path.resolve(options.archivePath);
   const outputRoot = path.resolve(options.outputRoot);
   if (archivePath === outputRoot || archivePath.startsWith(`${outputRoot}${path.sep}`)) {
