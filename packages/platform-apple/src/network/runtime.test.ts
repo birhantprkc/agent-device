@@ -214,5 +214,8 @@ function unusedAppLogHost(): Omit<
       web: { resolve: async () => undefined },
       finalize: { complete: async () => ({}) },
     },
-  };
+  } as unknown as Omit<
+    PlatformRuntimeHost,
+    'appleTools' | 'commands' | 'appLogs' | 'networkTransports'
+  >;
 }

@@ -61,6 +61,7 @@ test('schema capability mappings match capability source-of-truth', () => {
   const capabilityCatalogCommands = commandDescriptors
     .filter(
       (descriptor) =>
+        descriptor.catalog.group === 'public' &&
         (('capability' in descriptor && descriptor.capability !== undefined) ||
           descriptor.platformExecution.kind === 'device-runtime') &&
         cliCommands.has(descriptor.name),

@@ -21,6 +21,10 @@ import type {
   LimrunRuntimeDependencies,
 } from './runtime-dependencies.ts';
 import { normalizeOptionalString } from './strings.ts';
+import {
+  awaitLimrunDeploymentOperation,
+  type LimrunRequestOperationDrain,
+} from './request-cancellation.ts';
 
 type LimrunAdbTunnel = Awaited<ReturnType<LimrunAndroidClient['startAdbTunnel']>>;
 
@@ -84,18 +88,34 @@ export async function installLimrunAndroidApp(
   session: LimrunAndroidSession,
   installablePath: string,
   options?: ProviderDeviceInstallOptions,
+  signal?: AbortSignal,
+  operationDrain?: LimrunRequestOperationDrain,
 ): Promise<ProviderDeviceInstallResult> {
+  signal?.throwIfAborted();
   const packageName = normalizeOptionalString(options?.packageNameHint);
   if (options?.relaunch && packageName) {
     await runLimrunAndroidAdb(session, ['shell', 'am', 'force-stop', packageName], {
       allowFailure: true,
+      signal,
     });
   }
-  const asset = await limrun.assets.getOrUpload({
-    path: installablePath,
-    name: buildAndroidAssetName(packageName, installablePath),
-  });
-  await session.client.sendAsset(asset.signedDownloadUrl);
+  const asset = await awaitLimrunDeploymentOperation(
+    operationDrain,
+    limrun.assets.getOrUpload(
+      {
+        path: installablePath,
+        name: buildAndroidAssetName(packageName, installablePath),
+      },
+      { signal },
+    ),
+    signal,
+  );
+  await awaitLimrunDeploymentOperation(
+    operationDrain,
+    session.client.sendAsset(asset.signedDownloadUrl),
+    signal,
+  );
+  signal?.throwIfAborted();
   const appName = packageName
     ? await session.dependencies.android.inferAppName(packageName)
     : undefined;

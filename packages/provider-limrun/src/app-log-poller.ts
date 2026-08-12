@@ -8,6 +8,7 @@ import type {
 import { AsyncCleanupStack } from '@agent-device/contracts/platform';
 import { createAppLogLiveHandleFromFinish } from '@agent-device/capture-kit';
 import type { LogBackend } from '@agent-device/contracts/observability';
+import { awaitLimrunOperation } from './request-cancellation.ts';
 
 export type LimrunAppLogReader = AsyncDisposable &
   Readonly<{
@@ -115,9 +116,10 @@ async function boundedRead(options: {
   appBundleId: string;
 }): Promise<Readonly<{ status: 'read'; text: string }> | Readonly<{ status: 'timeout' }>> {
   const controller = new AbortController();
-  const read = abortable(
+  const read = awaitLimrunOperation(
     options.reader.readLogs(options.appBundleId, 1_000),
     controller.signal,
+    'App-log provider read aborted',
   ).then((text) => ({ status: 'read' as const, text }));
   try {
     const result = await Promise.race([
@@ -134,27 +136,6 @@ async function boundedRead(options: {
   } finally {
     controller.abort();
   }
-}
-
-async function abortable<Value>(source: Promise<Value>, signal: AbortSignal): Promise<Value> {
-  return await new Promise<Value>((resolve, reject) => {
-    const aborted = () => reject(signal.reason ?? new Error('App-log provider read aborted'));
-    if (signal.aborted) {
-      aborted();
-      return;
-    }
-    signal.addEventListener('abort', aborted, { once: true });
-    void source.then(
-      (value) => {
-        signal.removeEventListener('abort', aborted);
-        resolve(value);
-      },
-      (error: unknown) => {
-        signal.removeEventListener('abort', aborted);
-        reject(error);
-      },
-    );
-  });
 }
 
 function appendedTail(previous: string, current: string): string {

@@ -49,12 +49,10 @@ const HARMONYOS_SUPPORTED_COMMANDS = new Set<string>([
   'get',
   'home',
   'gesture',
-  'install',
   'keyboard',
   'is',
   'longpress',
   'press',
-  'reinstall',
   'screenshot',
   'scroll',
   'settings',
@@ -162,8 +160,9 @@ export function listCapabilityCommands(): string[] {
   return commandDescriptors
     .filter(
       (descriptor) =>
-        ('capability' in descriptor && descriptor.capability !== undefined) ||
-        descriptor.platformExecution.kind === 'device-runtime',
+        descriptor.catalog.group === 'public' &&
+        (('capability' in descriptor && descriptor.capability !== undefined) ||
+          descriptor.platformExecution.kind === 'device-runtime'),
     )
     .map((descriptor) => descriptor.name)
     .sort();

@@ -224,9 +224,15 @@ async function createCloudWebDriverWorld() {
     BROWSERSTACK_SESSION_DETAILS_ENDPOINT: `${server.url}/app-automate/sessions`,
   });
   const providers = createProviderDeviceRuntimeRequestProviders(runtimes);
+  const providerModules = runtimes.map((runtime) =>
+    Object.freeze({ runtime, module: runtime.platformRuntimeModule }),
+  );
   const daemon = await createProviderScenarioHarness({
     ...providers,
     deviceInventorySource: providers.deviceInventorySource!,
+    platformRuntime: true,
+    providerRuntimes: runtimes,
+    providerModules,
   });
   return {
     daemon,

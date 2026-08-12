@@ -11,6 +11,10 @@ import type { DeviceInfo } from '@agent-device/kernel/device';
 import { createAndroidAppLogRuntime } from './logs/runtime.ts';
 import { dumpAndroidNetworkTraffic } from './network/runtime.ts';
 import { bindAndroidScreenRecordingRuntime } from './recording/runtime.ts';
+import {
+  androidAppDeploymentFacts,
+  createAndroidAppDeploymentOperations,
+} from './deployment/runtime.ts';
 import { ensureAndroidReady } from './readiness/runtime.ts';
 import { readAndroidAppState } from './app-state.ts';
 
@@ -36,10 +40,12 @@ export function createAndroidPlatformRuntime(host: PlatformRuntimeHost): Platfor
   const appLogs = createAndroidAppLogRuntime(host);
   const inspectFacts = async (device: Parameters<typeof appLogs.inspectFacts>[0]) => {
     const logs = await appLogs.inspectFacts(device);
+    const deployment = androidAppDeploymentFacts(device);
     return Object.freeze({
       device: logs.device,
       operations: {
         ...logs.operations,
+        ...deployment,
         appState: device.kind === 'simulator' ? appStateUnavailable : available,
         networkDump: available,
         screenRecordingStart: available,
@@ -72,6 +78,11 @@ export function createAndroidPlatformRuntime(host: PlatformRuntimeHost): Platfor
         facts,
         operations: Object.freeze({
           ...logs.operations,
+          ...createAndroidAppDeploymentOperations({
+            executor: host.androidDeployment,
+            device: request.device,
+            signal: request.scope.signal,
+          }),
           ...(facts.operations.appState.available
             ? {
                 appState: async () =>

@@ -98,9 +98,9 @@ export const IOS_SIMULATOR_E2E_COVERAGE = {
   ),
   [C.install]: live('smoke:inventory-install', 'public CLI installs the cached fixture .app'),
   [C.installFromSource]: contract(
-    'src/daemon/handlers/__tests__/install-source.test.ts',
-    'install_from_source prepares and installs a local iOS simulator app source with typed identity',
-    'real local .app preparation, simulator install dispatch, and typed identity',
+    'packages/platform-apple/src/deployment/runtime.test.ts',
+    'exposes only fact-admitted Apple deployment operations',
+    'fact-admitted local .app materialization, simulator install dispatch, and typed identity',
   ),
   [C.is]: live('smoke:automation-input', 'visible/editable predicates pass on fixture nodes'),
   [C.keyboard]: live(

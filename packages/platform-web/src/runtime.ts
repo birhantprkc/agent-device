@@ -30,6 +30,10 @@ const appsUnavailable = Object.freeze({
   reason: 'unsupported-platform-leaf',
   hint: 'apps is not supported on web targets.',
 } as const);
+const deploymentUnavailable = Object.freeze({
+  available: false,
+  reason: 'unsupported-platform-leaf',
+} as const);
 const appStateUnavailable = Object.freeze({
   available: false,
   reason: 'unsupported-platform-leaf',
@@ -137,6 +141,10 @@ function webRuntimeFacts(
       appLogStart: appLogUnavailable,
       appLogReattach: appLogUnavailable,
       appLogCleanup: appLogUnavailable,
+      deployApp: deploymentUnavailable,
+      materializeAppSource: deploymentUnavailable,
+      deployMaterializedApp: deploymentUnavailable,
+      sendPushNotification: deploymentUnavailable,
       appState: appStateUnavailable,
       networkDump: transport.dump ? available : networkUnavailable,
       screenRecordingStart: recordingAvailable ? available : recordingUnavailable,

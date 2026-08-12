@@ -47,6 +47,7 @@ export async function runIosDevicectl(
   args: string[],
   context: { action: string; deviceId: string },
   options: {
+    signal?: AbortSignal;
     timeoutMs?: number;
     /**
      * Treat a non-zero exit as success when its output matches — e.g. an
@@ -58,6 +59,7 @@ export async function runIosDevicectl(
   const fullArgs = ['devicectl', ...args];
   const result = await runXcrun(fullArgs, {
     allowFailure: true,
+    signal: options.signal,
     timeoutMs: options.timeoutMs ?? IOS_DEVICECTL_TIMEOUT_MS,
   });
   if (result.exitCode === 0) return;

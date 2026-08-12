@@ -35,9 +35,9 @@ test('integration paths get the larger budget', () => {
 test('known slow tests are reported when they exceed the budget', () => {
   const offender = classifySlowTest({
     root: '/repo',
-    moduleId: '/repo/src/platforms/android/__tests__/app-lifecycle-install.test.ts',
-    name: 'installAndroidApp installs .apk via adb install -r',
-    fullName: 'installAndroidApp installs .apk via adb install -r',
+    moduleId: '/repo/src/platforms/android/__tests__/app-deployment.test.ts',
+    name: 'installAndroidInstallablePath installs .apk via adb install -r',
+    fullName: 'installAndroidInstallablePath installs .apk via adb install -r',
     durationMs: 9_000,
   });
   assert.ok(offender);

@@ -29,7 +29,6 @@ import {
   handleScrollCommand,
   handleTypeCommand,
 } from './dispatch-interactions.ts';
-import { readNotificationPayload } from './dispatch-payload.ts';
 import { getInteractor } from './interactors.ts';
 import { readViewportDimension } from './viewport-dimension.ts';
 
@@ -184,7 +183,6 @@ const DISPATCH_HANDLERS: Record<DispatchCommand, DispatchHandler> = {
     handleTvRemoteCommand(device, interactor, positionals, context),
   settings: ({ device, interactor, positionals, context }) =>
     handleSettingsCommand(device, interactor, positionals, context),
-  push: ({ device, positionals, context }) => handlePushCommand(device, positionals, context),
   snapshot: ({ interactor, context }) => handleSnapshotCommand(interactor, context),
   read: ({ device, positionals, context }) => handleReadCommand(device, positionals, context),
 };
@@ -705,37 +703,6 @@ function buildSettingsDiagnosticPayload(
     };
   }
   return { setting, state, appBundleId, platform: device.platform };
-}
-
-async function handlePushCommand(
-  device: DeviceInfo,
-  positionals: string[],
-  _context: DispatchContext | undefined,
-): Promise<Record<string, unknown>> {
-  const target = positionals[0]?.trim();
-  const payloadArg = positionals[1]?.trim();
-  if (!target || !payloadArg) {
-    throw new AppError('INVALID_ARGS', 'push requires <bundle|package> <payload.json|inline-json>');
-  }
-  const payload = await readNotificationPayload(payloadArg);
-  if (isIosFamily(device)) {
-    const { pushIosNotification } = await import('../platforms/apple/core/apps.ts');
-    await pushIosNotification(device, target, payload);
-    return {
-      platform: 'ios',
-      bundleId: target,
-      ...successText(`Pushed notification to ${target}`),
-    };
-  }
-  const { pushAndroidNotification } = await import('../platforms/android/notifications.ts');
-  const androidResult = await pushAndroidNotification(device, target, payload);
-  return {
-    platform: 'android',
-    package: target,
-    action: androidResult.action,
-    extrasCount: androidResult.extrasCount,
-    ...successText(`Pushed notification to ${target}`),
-  };
 }
 
 async function handleSnapshotCommand(

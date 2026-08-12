@@ -6,7 +6,7 @@ import { IOS_DEVICE as SHARED_IOS_DEVICE } from '../../../../__tests__/test-util
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import type { AppError } from '@agent-device/kernel/errors';
 import { createAppleInteractor } from '../../interactor.ts';
-import { installIosApp } from '../app-install.ts';
+import { installIosInstallablePath } from '../app-install.ts';
 import { closeIosApp, openIosApp } from '../app-launch.ts';
 import { listIosApps } from '../app-resolution.ts';
 import { resolveIosPhysicalDeviceControl } from '../physical-device-control.ts';
@@ -133,7 +133,7 @@ test('CoreDevice-only app inventory and install fail with targeted XCTest guidan
     /App inventory is unavailable on this XCTest-backed physical iOS device/,
   );
   await assert.rejects(
-    () => installIosApp(XCTEST_IOS_DEVICE, '/missing/example.app'),
+    () => installIosInstallablePath(XCTEST_IOS_DEVICE, '/missing/example.app'),
     /Installing apps is unavailable on this XCTest-backed physical iOS device/,
   );
 });

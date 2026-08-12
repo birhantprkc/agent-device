@@ -5,7 +5,6 @@ import { parseLimrunDeviceId } from './device.ts';
 import type {
   AppStateRuntimeResult,
   DeviceBinding,
-  PlatformRuntimeHost,
   PlatformRuntimeOperations,
   PlatformRuntimeOwner,
   RuntimeFacts,
@@ -17,40 +16,42 @@ import {
   createAppLogStartResult,
   readRecentNetworkTrafficFromText,
 } from '@agent-device/capture-kit';
-import {
-  createUnavailablePlatformRuntimeFacts,
-  providerRuntimeOwner,
-  sameRuntimeOwner,
-} from '@agent-device/contracts/platform';
+import { providerRuntimeOwner, sameRuntimeOwner } from '@agent-device/contracts/platform';
 import {
   createLimrunAppLogEnvelope,
   limrunAppLogDescriptorCodec,
   type LimrunAppLogDescriptor,
 } from './app-log-descriptor.ts';
 import { startLimrunAppLogPoller, type LimrunAppLogReader } from './app-log-poller.ts';
+import {
+  createLimrunAppDeploymentOperations,
+  isActiveLimrunRuntimeSession,
+  limrunAppDeploymentFacts,
+  type LimrunAppDeploymentRuntimeOptions,
+} from './deployment-runtime.ts';
+import { createLimrunRequestOperationDrain } from './request-cancellation.ts';
+import { isSupportedLimrunRuntimeDevice } from './runtime-device.ts';
 
 export type LimrunAppLogReconnectOutcome =
   | Readonly<{ status: 'opened'; reader: LimrunAppLogReader }>
   | Readonly<{ status: 'missing' }>
   | Readonly<{ status: 'ownership-lost' }>;
 
-export type LimrunPlatformRuntimeOwnerOptions = Readonly<{
-  host: PlatformRuntimeHost;
-  runtimeInstance: string;
-  ownsDevice(device: DeviceInfo): boolean;
-  openCurrent(device: DeviceInfo): Promise<LimrunAppLogReader | undefined>;
-  hasLiveSession(device: DeviceInfo): boolean;
-  reconnect(
-    descriptor: LimrunAppLogDescriptor,
-    signal?: AbortSignal,
-  ): Promise<LimrunAppLogReconnectOutcome>;
-  listApps(
-    device: DeviceInfo,
-    filter: AppsFilter,
-    signal: AbortSignal,
-  ): Promise<readonly { id: string; name: string }[]>;
-  getAppState(device: DeviceInfo, signal: AbortSignal): Promise<AppStateRuntimeResult>;
-}>;
+export type LimrunPlatformRuntimeOwnerOptions = LimrunAppDeploymentRuntimeOptions &
+  Readonly<{
+    runtimeInstance: string;
+    openCurrent(device: DeviceInfo): Promise<LimrunAppLogReader | undefined>;
+    reconnect(
+      descriptor: LimrunAppLogDescriptor,
+      signal?: AbortSignal,
+    ): Promise<LimrunAppLogReconnectOutcome>;
+    listApps(
+      device: DeviceInfo,
+      filter: AppsFilter,
+      signal: AbortSignal,
+    ): Promise<readonly { id: string; name: string }[]>;
+    getAppState(device: DeviceInfo, signal: AbortSignal): Promise<AppStateRuntimeResult>;
+  }>;
 
 const available = Object.freeze({ available: true } as const);
 const recordingUnavailable = Object.freeze({
@@ -63,56 +64,45 @@ const headlessUnavailable = Object.freeze({
   reason: 'unsupported-provider-mode',
   hint: 'Headless boot is unavailable for provider-owned devices.',
 } as const);
-const liveSessionUnavailable = Object.freeze({
+const inactiveSession = Object.freeze({
   available: false,
-  reason: 'unsupported-provider-mode',
-  hint: 'Limrun requires a matching live provider session for this device.',
+  reason: 'owner-capability-missing',
+  hint: 'The Limrun provider session is no longer active for this device.',
 } as const);
 
 export function createLimrunPlatformRuntimeOwner(
   options: LimrunPlatformRuntimeOwnerOptions,
 ): PlatformRuntimeOwner {
   const owner = providerRuntimeOwner('limrun', options.runtimeInstance);
-  const ownsDevice = (device: DeviceInfo) =>
-    isSupportedLimrunAppLogDevice(device) && options.ownsDevice(device);
-  const hasLiveSession = (device: DeviceInfo) =>
-    ownsDevice(device) && options.hasLiveSession(device);
   return Object.freeze({
     owner,
-    ownsDevice,
-    inspectFacts: async (device) =>
-      hasLiveSession(device)
-        ? facts(device)
-        : createUnavailablePlatformRuntimeFacts(device, owner, {
-            appLog: liveSessionUnavailable,
-            appState: liveSessionUnavailable,
-            network: liveSessionUnavailable,
-            readiness: liveSessionUnavailable,
-          }),
+    ownsDevice: (device) => isSupportedLimrunRuntimeDevice(device) && options.ownsDevice(device),
+    inspectFacts: async (device) => facts(options, device),
     bind: async (request) => {
       if (request.intent.kind === 'exact-owner' && !sameRuntimeOwner(request.intent.owner, owner)) {
         throw new AppError('UNSUPPORTED_OPERATION', 'Limrun app-log owner identity does not match');
       }
-      if (!isSupportedLimrunAppLogDevice(request.device)) {
+      if (!isSupportedLimrunRuntimeDevice(request.device)) {
         throw new AppError(
           'UNSUPPORTED_PLATFORM',
           'Limrun app logs require an iOS simulator or Android emulator device identity',
         );
       }
-      const hasMatchingLiveSession = hasLiveSession(request.device);
-      if (request.intent.kind !== 'exact-owner' && !hasMatchingLiveSession) {
-        throw new AppError(
-          'UNSUPPORTED_OPERATION',
-          'Limrun provider session is no longer live for the selected device',
-          { reason: 'provider-session-unavailable' },
-        );
+      if (
+        request.intent.kind !== 'exact-owner' &&
+        !isActiveLimrunRuntimeSession(options, request.device)
+      ) {
+        throw new AppError('UNSUPPORTED_OPERATION', 'Limrun provider session is unavailable', {
+          reason: 'provider-session-unavailable',
+        });
       }
       return bindLimrunAppLogs(
         options,
         owner,
         request.device,
         request.scope.signal,
-        !hasMatchingLiveSession,
+        request.intent.kind === 'exact-owner' &&
+          !isActiveLimrunRuntimeSession(options, request.device),
       );
     },
     shutdown: async () => undefined,
@@ -126,6 +116,9 @@ function bindLimrunAppLogs(
   signal: AbortSignal,
   recoveryOnly: boolean,
 ): DeviceBinding<PlatformRuntimeOperations> {
+  // Limrun's WebSocket deployment calls cannot be aborted individually. Keep their completion
+  // request-bound so a cancelled caller cannot release the provider session mid-mutation.
+  const deploymentOperationDrain = createLimrunRequestOperationDrain();
   const recovery = createAppLogRecoveryOperations({
     codec: limrunAppLogDescriptorCodec,
     reattach: async (descriptor, context) => {
@@ -226,25 +219,48 @@ function bindLimrunAppLogs(
           : [];
       return Object.freeze({ source: 'app-log' as const, backend, dump, notes });
     },
-    ensureReady: async () => ({ ...device, booted: true }),
-    bootTarget: async () => ({ ...device, booted: true }),
-    listApps: async (input) => await options.listApps(input.device, input.filter, signal),
-    ...(device.platform === 'android'
-      ? {
-          appState: async () => await options.getAppState(device, signal),
-        }
-      : {}),
+    ...(recoveryOnly
+      ? {}
+      : {
+          ensureReady: async () => ({ ...device, booted: true }),
+          bootTarget: async () => ({ ...device, booted: true }),
+          listApps: async (input) => await options.listApps(input.device, input.filter, signal),
+          ...(device.platform === 'android'
+            ? { appState: async () => await options.getAppState(device, signal) }
+            : {}),
+          ...createLimrunAppDeploymentOperations(options, device, signal, deploymentOperationDrain),
+        }),
   } satisfies DeviceBinding<PlatformRuntimeOperations>['operations'];
   return Object.freeze({
     device,
     owner,
-    facts: recoveryOnly ? recoveryFacts(device) : facts(device),
-    operations: Object.freeze(
-      recoveryOnly
-        ? { appLogReattach: recovery.appLogReattach, appLogCleanup: recovery.appLogCleanup }
-        : operations,
-    ),
-    [Symbol.asyncDispose]: async () => undefined,
+    facts: recoveryOnly ? recoveryFacts(options, device) : facts(options, device),
+    operations: Object.freeze(operations),
+    [Symbol.asyncDispose]: async () => await deploymentOperationDrain[Symbol.asyncDispose](),
+  });
+}
+
+function recoveryFacts(
+  options: LimrunPlatformRuntimeOwnerOptions,
+  device: DeviceInfo,
+): RuntimeFacts<PlatformRuntimeOperations> {
+  const normal = facts(options, device);
+  return Object.freeze({
+    device: normal.device,
+    operations: {
+      ...normal.operations,
+      appLogInspect: inactiveSession,
+      appLogDoctor: inactiveSession,
+      appLogStart: inactiveSession,
+      appLogReattach: available,
+      appLogCleanup: available,
+      appState: inactiveSession,
+      networkDump: inactiveSession,
+      ensureReady: inactiveSession,
+      bootTarget: inactiveSession,
+      bootTargetHeadless: inactiveSession,
+      listApps: inactiveSession,
+    },
   });
 }
 
@@ -264,7 +280,15 @@ async function currentSessionAvailable(
   return true;
 }
 
-function facts(device: DeviceInfo): RuntimeFacts<PlatformRuntimeOperations> {
+function facts(
+  options: LimrunPlatformRuntimeOwnerOptions,
+  device: DeviceInfo,
+): RuntimeFacts<PlatformRuntimeOperations> {
+  // Deployment/readiness require an in-memory live device session. Durable app-log recovery and
+  // historical network inspection retain their own fenced reconnection/read paths and therefore
+  // remain independently admitted after a daemon loses its live session cache.
+  const readiness = isActiveLimrunRuntimeSession(options, device) ? available : inactiveSession;
+  const deployment = limrunAppDeploymentFacts(options, device);
   return Object.freeze({
     device: {
       family: device.platform,
@@ -279,23 +303,24 @@ function facts(device: DeviceInfo): RuntimeFacts<PlatformRuntimeOperations> {
     operations: {
       appLogInspect: available,
       appLogDoctor: available,
-      appLogStart: available,
+      appLogStart: readiness,
       appLogReattach: available,
       appLogCleanup: available,
+      ...deployment,
       appState:
         device.platform === 'android'
-          ? available
+          ? readiness
           : {
               available: false,
               reason: 'unsupported-provider-mode',
-              hint: 'Limrun iOS appstate is session-owned; no sessionless provider foreground probe is exposed.',
+              hint: 'Limrun iOS does not expose a foreground app-state operation.',
             },
       networkDump: available,
       screenRecordingStart: recordingUnavailable,
       screenRecordingReattach: recordingUnavailable,
       screenRecordingCleanup: recordingUnavailable,
-      ensureReady: available,
-      bootTarget: available,
+      ensureReady: readiness,
+      bootTarget: readiness,
       bootTargetHeadless: headlessUnavailable,
       listApps: available,
       shutdownTarget: {
@@ -307,36 +332,12 @@ function facts(device: DeviceInfo): RuntimeFacts<PlatformRuntimeOperations> {
   });
 }
 
-function recoveryFacts(device: DeviceInfo): RuntimeFacts<PlatformRuntimeOperations> {
-  const normalFacts = facts(device);
-  return Object.freeze({
-    device: normalFacts.device,
-    operations: {
-      ...normalFacts.operations,
-      appLogInspect: liveSessionUnavailable,
-      appLogDoctor: liveSessionUnavailable,
-      appLogStart: liveSessionUnavailable,
-      appLogReattach: available,
-      appLogCleanup: available,
-      appState: liveSessionUnavailable,
-      networkDump: liveSessionUnavailable,
-      screenRecordingStart: liveSessionUnavailable,
-      screenRecordingReattach: liveSessionUnavailable,
-      screenRecordingCleanup: liveSessionUnavailable,
-      ensureReady: liveSessionUnavailable,
-      bootTarget: liveSessionUnavailable,
-      bootTargetHeadless: liveSessionUnavailable,
-      listApps: liveSessionUnavailable,
-    },
-  });
-}
-
 function backendForDevice(device: DeviceInfo): 'ios-simulator' | 'android' {
   return device.platform === 'apple' ? 'ios-simulator' : 'android';
 }
 
 function descriptorMatchesDevice(descriptor: LimrunAppLogDescriptor, device: DeviceInfo): boolean {
-  if (!isSupportedLimrunAppLogDevice(device)) return false;
+  if (!isSupportedLimrunRuntimeDevice(device)) return false;
   const parsed = parseLimrunDeviceId(device.id);
   return (
     parsed !== undefined &&
@@ -345,31 +346,5 @@ function descriptorMatchesDevice(descriptor: LimrunAppLogDescriptor, device: Dev
     (device.platform === 'apple'
       ? descriptor.platform === 'ios'
       : descriptor.platform === 'android')
-  );
-}
-
-function isSupportedLimrunAppLogDevice(device: DeviceInfo): boolean {
-  const parsed = parseLimrunDeviceId(device.id);
-  if (!parsed || device.target !== 'mobile') return false;
-  return parsed.platform === 'ios'
-    ? isSupportedLimrunIosDevice(device)
-    : isSupportedLimrunAndroidDevice(device);
-}
-
-function isSupportedLimrunIosDevice(device: DeviceInfo): boolean {
-  return (
-    device.platform === 'apple' &&
-    device.appleOs === 'ios' &&
-    device.kind === 'simulator' &&
-    device.iosPhysicalDeviceBackend === undefined
-  );
-}
-
-function isSupportedLimrunAndroidDevice(device: DeviceInfo): boolean {
-  return (
-    device.platform === 'android' &&
-    device.appleOs === undefined &&
-    device.kind === 'emulator' &&
-    device.iosPhysicalDeviceBackend === undefined
   );
 }

@@ -51,8 +51,8 @@ export type IosPhysicalDeviceControl = {
   assertAppInstallationSupported(device: DeviceInfo): void;
   ensureReady(device: DeviceInfo, signal?: AbortSignal): Promise<void>;
   listApps(device: DeviceInfo, filter: AppsFilter): Promise<IosAppInfo[]>;
-  installApp(device: DeviceInfo, installablePath: string): Promise<void>;
-  uninstallApp(device: DeviceInfo, bundleId: string): Promise<void>;
+  installApp(device: DeviceInfo, installablePath: string, signal?: AbortSignal): Promise<void>;
+  uninstallApp(device: DeviceInfo, bundleId: string, signal?: AbortSignal): Promise<void>;
   launchApp(
     device: DeviceInfo,
     bundleId: string,

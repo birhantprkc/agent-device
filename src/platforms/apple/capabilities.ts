@@ -24,10 +24,9 @@ import {
 
 export type AppleOsCapabilityProfile = {
   /**
-   * `install` / `boot` / `reinstall` / `install-from-source` / `push` / `home` /
-   * `app-switcher` — the app + device lifecycle and springboard surfaces. `false`
-   * on the macOS host, which drives an already-running app (nothing to boot/install/
-   * push, no springboard home or app switcher).
+   * `boot` / `home` / `app-switcher` — the app + device lifecycle and springboard surfaces. `false`
+   * on the macOS host, which drives an already-running app (nothing to boot, no
+   * springboard home or app switcher).
    */
   readonly appAndDeviceLifecycle: boolean;
   /** `keyboard` — hardware/text keyboard input. tvOS (focus-only) and macOS lack it. */
@@ -62,7 +61,7 @@ export const APPLE_OS_CAPABILITIES: Record<AppleOS, AppleOsCapabilityProfile> = 
     physicalDeviceSurfaces: false,
   },
   // tvOS: focus-only (XCUIRemote), so no keyboard or orientation; the app + device
-  // lifecycle (boot/install/home/app-switcher) is supported like the mobile family.
+  // lifecycle (boot/home/app-switcher) is supported like the mobile family.
   tvos: {
     appAndDeviceLifecycle: true,
     keyboard: false,
@@ -70,7 +69,7 @@ export const APPLE_OS_CAPABILITIES: Record<AppleOS, AppleOsCapabilityProfile> = 
     physicalDeviceSurfaces: false,
   },
   // macOS: an AppKit desktop host driving an already-running app. No app/device
-  // lifecycle (nothing to boot/install/push, no springboard), keyboard, or orientation;
+  // lifecycle (nothing to boot, no springboard), keyboard, or orientation;
   // clipboard/alert/settings are reachable on the host directly (no simulator required).
   macos: {
     appAndDeviceLifecycle: false,

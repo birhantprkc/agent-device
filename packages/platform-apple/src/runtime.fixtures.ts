@@ -23,6 +23,20 @@ export function platformRuntimeHostFixture(): PlatformRuntimeHost {
       android: { run: async () => ({ stdout: '' }) },
       harmonyos: { run: async () => ({ stdout: '' }) },
     },
+    appleDeployment: {
+      prepareArtifact: async () => {
+        throw new Error('unused');
+      },
+      install: async () => {
+        throw new Error('unused');
+      },
+      uninstall: async () => {
+        throw new Error('unused');
+      },
+      push: async () => {
+        throw new Error('unused');
+      },
+    },
     deviceReadiness: {
       applePhysical: { ensureConnected: async () => {} },
       appleAutomation: { keepHot: () => {} },
@@ -73,5 +87,5 @@ export function platformRuntimeHostFixture(): PlatformRuntimeHost {
       outputs: { prepare: async () => {} },
       finalize: { complete: async () => ({}) },
     },
-  };
+  } as unknown as PlatformRuntimeHost;
 }

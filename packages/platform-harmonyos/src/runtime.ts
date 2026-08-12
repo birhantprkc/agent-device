@@ -11,6 +11,10 @@ import {
   createHarmonyScreenRecordingOperations,
   harmonyScreenRecordingFacts,
 } from './recording/runtime.ts';
+import {
+  createHarmonyAppDeploymentOperations,
+  harmonyAppDeploymentFacts,
+} from './deployment/runtime.ts';
 import { readHarmonyAppState } from './app-state.ts';
 
 const owner = localRuntimeOwner('harmonyos');
@@ -29,11 +33,13 @@ export function createHarmonyPlatformRuntime(host: PlatformRuntimeHost): Platfor
   const appLogs = createHarmonyAppLogRuntime(host);
   const inspectFacts = async (device: Parameters<typeof appLogs.inspectFacts>[0]) => {
     const logs = await appLogs.inspectFacts(device);
+    const deployment = harmonyAppDeploymentFacts(device);
     const recordingFacts = harmonyScreenRecordingFacts(device);
     return Object.freeze({
       device: logs.device,
       operations: {
         ...logs.operations,
+        ...deployment,
         appState: device.kind === 'simulator' ? appStateUnavailable : available,
         networkDump: unavailable,
         screenRecordingStart: recordingFacts,
@@ -61,6 +67,11 @@ export function createHarmonyPlatformRuntime(host: PlatformRuntimeHost): Platfor
         facts,
         operations: Object.freeze({
           ...logs.operations,
+          ...createHarmonyAppDeploymentOperations({
+            executor: host.harmonyDeployment,
+            device: request.device,
+            signal: request.scope.signal,
+          }),
           ...(facts.operations.appState.available
             ? {
                 appState: async () =>

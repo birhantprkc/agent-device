@@ -74,6 +74,37 @@ test('is_keyboard_shown honors a caller timeout shorter than the client default'
   });
 });
 
+test('installApp aborts an in-flight provider request when its binding is cancelled', async () => {
+  const controller = new AbortController();
+  let requestSignal: AbortSignal | undefined;
+  let settleRequest: (() => void) | undefined;
+  const client = await connectedClient(
+    async (_input, init) =>
+      await new Promise<Response>((resolve) => {
+        requestSignal = init?.signal ?? undefined;
+        settleRequest = () =>
+          resolve(
+            new Response(JSON.stringify({ value: {} }), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          );
+      }),
+  );
+
+  const pending = client.installApp('/tmp/App.apk', controller.signal);
+  await Promise.resolve();
+  controller.abort(new Error('request cancelled'));
+  await Promise.resolve();
+
+  try {
+    assert.equal(requestSignal?.aborted, true);
+  } finally {
+    settleRequest?.();
+    await pending.catch(() => undefined);
+  }
+});
+
 // The focused element is the only signal that can say WHICH field took focus,
 // so `fill` fails closed when it is unavailable. Each wire shape it
 // distinguishes is pinned here.

@@ -45,6 +45,18 @@ test('direct WebDriver network uses only the canonical session log and preserves
   });
   expect(binding.facts.operations.networkDump).toEqual({ available: true });
   expect(binding.facts.operations.appLogInspect).toMatchObject({ available: false });
+  for (const operation of [
+    'deployApp',
+    'materializeAppSource',
+    'deployMaterializedApp',
+    'sendPushNotification',
+  ] as const) {
+    expect(binding.facts.operations[operation]).toMatchObject({
+      available: false,
+      reason: 'unsupported-provider-mode',
+    });
+  }
+  expect(binding.operations.deployApp).toBeUndefined();
   expect(run).not.toHaveBeenCalled();
 });
 
@@ -108,7 +120,99 @@ test.each([
   ).resolves.toMatchObject({ source: 'app-log', backend });
 });
 
+test.each([
+  ['Android', device],
+  [
+    'iOS',
+    {
+      ...device,
+      platform: 'apple' as const,
+      appleOs: 'ios' as const,
+      id: 'browserstack:ios:lease-one',
+      name: 'Remote iPhone',
+    },
+  ],
+] as const)(
+  'uses an admitted direct WebDriver deployment runtime for %s without a local fallback',
+  async (_name, runtimeDevice) => {
+    const deployApp = vi.fn(async () => ({ launchTarget: 'provider-installed' }));
+    const deployMaterializedApp = vi.fn(async () => ({ launchTarget: 'provider-materialized' }));
+    const materializeApple = vi.fn(async () => ({
+      installablePath: '/tmp/App.app',
+      cleanup: async () => {},
+    }));
+    const materializeAndroid = vi.fn(async () => ({
+      installablePath: '/tmp/app.apk',
+      cleanup: async () => {},
+    }));
+    const base = host(async () => ({ stdout: '', stderr: '', exitCode: 0 }));
+    const owner = createWebDriverPlatformRuntimeOwner({
+      host: {
+        ...base,
+        appleDeployment: {
+          prepareArtifact: materializeApple,
+        } as unknown as PlatformRuntimeHost['appleDeployment'],
+        androidDeployment: {
+          prepareArtifact: materializeAndroid,
+        } as unknown as PlatformRuntimeHost['androidDeployment'],
+      },
+      owner: providerRuntimeOwner(
+        'browserstack',
+        runtimeDevice.platform === 'apple' ? 'ios' : 'android',
+      ),
+      ownsDevice: () => true,
+      deployment: {
+        fact: () => ({ available: true }),
+        deployApp,
+        deployMaterializedApp,
+      },
+    });
+    const controller = new AbortController();
+    const binding = await owner.bind({
+      device: runtimeDevice,
+      intent: { kind: 'ordinary' },
+      scope: {
+        signal: controller.signal,
+        diagnostics: { emit: () => {} },
+        progress: { report: () => {} },
+      },
+    });
+
+    for (const operation of [
+      'deployApp',
+      'materializeAppSource',
+      'deployMaterializedApp',
+    ] as const) {
+      expect(binding.facts.operations[operation]).toEqual({ available: true });
+    }
+    expect(binding.facts.operations.sendPushNotification).toMatchObject({
+      available: false,
+      reason: 'unsupported-provider-mode',
+    });
+    const deployInput = {
+      app: 'com.example.app',
+      appPath: '/tmp/app',
+      replaceExisting: false,
+    };
+    await binding.operations.deployApp?.(deployInput);
+    const artifact = await binding.operations.materializeAppSource?.({
+      source: { kind: 'path', path: '/tmp/app' },
+    });
+    const materializedInput = { artifact: artifact! };
+    await binding.operations.deployMaterializedApp?.(materializedInput);
+    expect(deployApp).toHaveBeenCalledWith(runtimeDevice, deployInput, controller.signal);
+    expect(deployMaterializedApp).toHaveBeenCalledWith(
+      runtimeDevice,
+      materializedInput,
+      controller.signal,
+    );
+    expect(materializeApple).toHaveBeenCalledTimes(runtimeDevice.platform === 'apple' ? 1 : 0);
+    expect(materializeAndroid).toHaveBeenCalledTimes(runtimeDevice.platform === 'android' ? 1 : 0);
+  },
+);
+
 function host(run: PlatformRuntimeHost['commands']['run']): PlatformRuntimeHost {
+  // This suite reaches direct network and the explicitly replaced materializer only.
   return {
     deviceReadiness: {
       applePhysical: { ensureConnected: async () => {} },
@@ -204,5 +308,5 @@ function host(run: PlatformRuntimeHost['commands']['run']): PlatformRuntimeHost 
       web: { resolve: async () => undefined },
       finalize: { complete: async () => ({}) },
     },
-  };
+  } as unknown as PlatformRuntimeHost;
 }

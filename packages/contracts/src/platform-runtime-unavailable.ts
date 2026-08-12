@@ -16,6 +16,7 @@ import type {
 export type UnavailablePlatformRuntimeFacts = Readonly<{
   appLog: RuntimeOperationUnavailability;
   apps?: RuntimeOperationUnavailability;
+  appDeployment?: RuntimeOperationUnavailability;
   appState?: RuntimeOperationUnavailability;
   network: RuntimeOperationUnavailability;
   screenRecording?: RuntimeOperationUnavailability;
@@ -26,6 +27,7 @@ export type UnavailablePlatformRuntimeFacts = Readonly<{
 type FrozenUnavailablePlatformRuntimeFacts = Readonly<{
   appLog: RuntimeOperationUnavailability;
   apps: RuntimeOperationUnavailability;
+  appDeployment: RuntimeOperationUnavailability;
   appState: RuntimeOperationUnavailability;
   network: RuntimeOperationUnavailability;
   screenRecording: RuntimeOperationUnavailability;
@@ -83,7 +85,7 @@ export function createUnavailablePlatformRuntimeFacts(
   owner: RuntimeOwnerRef,
   unavailable: UnavailablePlatformRuntimeFacts,
 ): RuntimeFacts<PlatformRuntimeOperations> {
-  const { appLog, apps, appState, network, screenRecording, readiness, shutdown } =
+  const { appLog, apps, appDeployment, appState, network, screenRecording, readiness, shutdown } =
     freezeUnavailableFacts(unavailable);
   return Object.freeze({
     device: {
@@ -97,6 +99,10 @@ export function createUnavailablePlatformRuntimeFacts(
       appLogReattach: appLog,
       appLogCleanup: appLog,
       listApps: apps,
+      deployApp: appDeployment,
+      materializeAppSource: appDeployment,
+      deployMaterializedApp: appDeployment,
+      sendPushNotification: appDeployment,
       appState,
       networkDump: network,
       screenRecordingStart: screenRecording,
@@ -116,6 +122,7 @@ function freezeUnavailableFacts(
   return Object.freeze({
     appLog: Object.freeze({ ...unavailable.appLog }),
     apps: Object.freeze({ ...(unavailable.apps ?? unavailable.network) }),
+    appDeployment: Object.freeze({ ...(unavailable.appDeployment ?? unavailable.network) }),
     appState: Object.freeze({ ...(unavailable.appState ?? unavailable.network) }),
     network: Object.freeze({ ...unavailable.network }),
     screenRecording: Object.freeze({

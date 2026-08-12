@@ -7,6 +7,7 @@ import {
   createProviderWebDriver,
   type RunHostCommand,
 } from '@agent-device/provider-webdriver';
+import type { PlatformRuntimeHost } from '@agent-device/contracts/platform';
 import { withProviderScenarioResource, withProviderScenarioTempDir } from './harness.ts';
 import {
   AwsRemoteAccessHost,
@@ -109,6 +110,62 @@ test('AWS Device Farm rejects local artifact install until upload support exists
         await runtime.shutdown();
       }
     });
+  });
+});
+
+test('an active AWS Device Farm owner binds no install-family deployment operations', async () => {
+  await withProviderScenarioResource(ProviderRegressionServer.start, async (server) => {
+    const host = new AwsRemoteAccessHost({ appiumEndpoint: `${server.url}/wd/hub/` });
+    const runtimes = createProviderWebDriver({
+      clientVersion: PROVIDER_REGRESSION_CLIENT_VERSION,
+      runHostCommand: host.run,
+    }).createDefaultRuntimes({ AWS_REGION: 'us-west-2' });
+    const runtime = runtimes.find(
+      (candidate) => candidate.provider === CLOUD_WEBDRIVER_PROVIDERS.awsDeviceFarm,
+    );
+    assert.ok(runtime, 'Expected AWS Device Farm runtime');
+    const lease = providerRegressionLease(CLOUD_WEBDRIVER_PROVIDERS.awsDeviceFarm);
+
+    try {
+      await runtime.leaseLifecycle.allocate?.(lease, awsRegressionContext());
+      const [device] =
+        (await runtime.deviceInventoryProvider({
+          leaseProvider: runtime.provider,
+          leaseId: lease.leaseId,
+          platform: 'android',
+        })) ?? [];
+      assert.ok(device, 'Expected active AWS Device Farm device');
+      const owner = await runtime.platformRuntimeModule.loadRuntime({} as PlatformRuntimeHost);
+      const binding = await owner.bind({
+        device,
+        intent: { kind: 'ordinary' },
+        scope: {
+          signal: new AbortController().signal,
+          diagnostics: { emit: () => {} },
+          progress: { report: () => {} },
+        },
+      });
+
+      try {
+        for (const operation of [
+          'deployApp',
+          'materializeAppSource',
+          'deployMaterializedApp',
+        ] as const) {
+          const fact = binding.facts.operations[operation];
+          assert.equal(fact.available, false);
+          if (fact.available) throw new Error(`Expected ${operation} to be unavailable`);
+          assert.equal(fact.reason, 'owner-capability-missing');
+          assert.match(fact.hint ?? '', /local artifact upload\/install is not implemented/);
+          assert.equal(binding.operations[operation], undefined);
+        }
+      } finally {
+        await binding[Symbol.asyncDispose]();
+      }
+    } finally {
+      await runtime.leaseLifecycle.release?.(lease);
+      await runtime.shutdown();
+    }
   });
 });
 

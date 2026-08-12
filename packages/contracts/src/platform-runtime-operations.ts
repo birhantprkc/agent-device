@@ -3,6 +3,12 @@ import type {
   AppInventoryRuntimeHost,
   AppInventoryRuntimeOperations,
 } from './app-inventory-runtime.ts';
+import type {
+  AndroidAppDeploymentExecutor,
+  AppDeploymentRuntimeOperations,
+  AppleAppDeploymentExecutor,
+  HarmonyAppDeploymentExecutor,
+} from './app-deployment-runtime.ts';
 import type { AppStateRuntimeHost, AppStateRuntimeOperations } from './app-state-runtime.ts';
 import type { NetworkRuntimeHost, NetworkRuntimeOperations } from './network-runtime.ts';
 import type { ScreenRecordingRuntimeHost } from './screen-recording-runtime-host.ts';
@@ -24,6 +30,7 @@ import { runtimeUse } from './platform-runtime-use.ts';
 
 export type PlatformRuntimeOperations = AppLogRuntimeOperations &
   AppInventoryRuntimeOperations &
+  AppDeploymentRuntimeOperations &
   AppStateRuntimeOperations &
   NetworkRuntimeOperations &
   ScreenRecordingRuntimeOperations &
@@ -86,6 +93,10 @@ export type PlatformRuntimeHost = AppLogRuntimeHost &
   Readonly<{
     appInventory: AppInventoryRuntimeHost;
     appState: AppStateRuntimeHost;
+    /** Focused native ports; deployment semantics remain in the owning family packages. */
+    appleDeployment: AppleAppDeploymentExecutor;
+    androidDeployment: AndroidAppDeploymentExecutor;
+    harmonyDeployment: HarmonyAppDeploymentExecutor;
     screenRecording: ScreenRecordingRuntimeHost;
     deviceReadiness: DeviceReadinessRuntimeHost;
     deviceShutdown: DeviceShutdownRuntimeHost;

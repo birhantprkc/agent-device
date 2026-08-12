@@ -224,6 +224,10 @@ function createRecordingPlatformRuntimeGateway(params: {
             appLogStart: { available: true },
             appLogReattach: { available: true },
             appLogCleanup: { available: true },
+            deployApp: unavailableRecording,
+            materializeAppSource: unavailableRecording,
+            deployMaterializedApp: unavailableRecording,
+            sendPushNotification: unavailableRecording,
             appState: {
               available: false,
               reason: 'unsupported-provider-mode',

@@ -37,6 +37,17 @@ test('preserves a narrow web provider dump including empty successful entries', 
     reason: 'unsupported-platform-leaf',
   });
   expect(binding.facts.operations.networkDump).toEqual({ available: true });
+  for (const operation of [
+    'deployApp',
+    'materializeAppSource',
+    'deployMaterializedApp',
+    'sendPushNotification',
+  ] as const) {
+    expect(binding.facts.operations[operation]).toMatchObject({
+      available: false,
+      reason: 'unsupported-platform-leaf',
+    });
+  }
   expect(binding.facts.operations.ensureReady).toMatchObject({ available: false });
   expect(binding.facts.operations.bootTarget).toMatchObject({ available: false });
   expect(binding.facts.operations.bootTargetHeadless).toMatchObject({ available: false });
@@ -226,5 +237,5 @@ function host(
       web: { resolve: async () => webRecording },
       finalize: { complete: async () => ({}) },
     },
-  };
+  } as unknown as PlatformRuntimeHost;
 }

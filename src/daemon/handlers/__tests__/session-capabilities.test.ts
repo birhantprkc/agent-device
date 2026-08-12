@@ -428,7 +428,7 @@ test.each([
     expect(response?.ok).toBe(true);
     if (!response?.ok) return;
     expect(response.data?.availableCommands).toContain(PUBLIC_COMMANDS.appState);
-    expect(inspectFacts).not.toHaveBeenCalled();
+    expect(inspectFacts).toHaveBeenCalledOnce();
   },
 );
 
@@ -565,6 +565,10 @@ function createAdmissionOperationFacts(
     appLogStart: unavailable,
     appLogReattach: unavailable,
     appLogCleanup: unavailable,
+    deployApp: unavailable,
+    materializeAppSource: unavailable,
+    deployMaterializedApp: unavailable,
+    sendPushNotification: unavailable,
     appState:
       (options.appStateAvailable ?? options.appLogAvailable)
         ? { available: true as const }

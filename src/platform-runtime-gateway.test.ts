@@ -129,7 +129,7 @@ describe('composed platform runtime gateway', () => {
       expect(response?.ok).toBe(false);
       if (response && !response.ok) {
         expect(response.error.code).toBe('UNSUPPORTED_OPERATION');
-        expect(response.error.hint).toMatch(/matching live provider session/i);
+        expect(response.error.hint).toMatch(/session is no longer active/i);
       }
       expect(inspectCount).toBe(1);
       expect(bindCount).toBe(0);
@@ -391,6 +391,10 @@ function unavailableFacts() {
     appLogStart: unavailable,
     appLogReattach: unavailable,
     appLogCleanup: unavailable,
+    deployApp: unavailable,
+    materializeAppSource: unavailable,
+    deployMaterializedApp: unavailable,
+    sendPushNotification: unavailable,
     appState: unavailable,
     networkDump: unavailable,
     screenRecordingStart: unavailable,

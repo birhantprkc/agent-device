@@ -12,6 +12,7 @@ export async function pushAndroidNotification(
   device: DeviceInfo,
   packageName: string,
   payload: AndroidBroadcastPayload,
+  options: Readonly<{ signal?: AbortSignal }> = {},
 ): Promise<{ action: string; extrasCount: number }> {
   const action =
     typeof payload.action === 'string' && payload.action.trim()
@@ -36,7 +37,7 @@ export async function pushAndroidNotification(
     appendBroadcastExtra(args, key, rawValue);
     extrasCount += 1;
   }
-  await runAndroidAdb(device, args);
+  await runAndroidAdb(device, args, { signal: options.signal });
   return { action, extrasCount };
 }
 

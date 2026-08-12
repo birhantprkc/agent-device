@@ -1,4 +1,3 @@
-import type { ProviderDeviceRuntime } from '@agent-device/contracts/device';
 import type {
   CloudArtifactsQuery,
   CloudArtifactsResult,
@@ -16,6 +15,7 @@ import {
   type CloudWebDriverConnectionVerification,
   type CloudWebDriverConnectionVerificationOptions,
 } from './connection-verification.ts';
+import type { CloudWebDriverRuntime } from './runtime.ts';
 
 export { CLOUD_WEBDRIVER_PROVIDERS, isCloudWebDriverProviderName };
 export { readAwsDeviceFarmRegionFromArn };
@@ -33,7 +33,7 @@ export type {
 
 export type ProviderWebDriver = {
   readonly providerIds: readonly string[];
-  createDefaultRuntimes(env?: DefaultCloudWebDriverProviderRuntimeEnv): ProviderDeviceRuntime[];
+  createDefaultRuntimes(env?: DefaultCloudWebDriverProviderRuntimeEnv): CloudWebDriverRuntime[];
   listArtifactsFromEnv(
     query: CloudArtifactsQuery,
     env: DefaultCloudWebDriverArtifactEnv,

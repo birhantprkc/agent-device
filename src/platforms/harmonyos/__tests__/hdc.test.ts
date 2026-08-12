@@ -32,3 +32,24 @@ test('runHarmonyHdc preserves an operation-specific timeout', async () => {
 
   assert.deepEqual(mockRunCmd.mock.calls[0]?.[2], { timeoutMs: 180_000 });
 });
+
+test('runHarmonyHdc forwards a binding abort signal to an in-flight HDC command', async () => {
+  const controller = new AbortController();
+  const aborted = new Error('request aborted');
+  mockRunCmd.mockImplementation(
+    async (_cmd, _args, options) =>
+      await new Promise<never>((_resolve, reject) => {
+        options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), {
+          once: true,
+        });
+      }),
+  );
+
+  const pending = runHarmonyHdc(device, ['install', '-r', '/tmp/example.hap'], {
+    signal: controller.signal,
+  });
+  controller.abort(aborted);
+
+  await assert.rejects(pending, (error: unknown) => error === aborted);
+  assert.equal(mockRunCmd.mock.calls[0]?.[2]?.signal, controller.signal);
+});

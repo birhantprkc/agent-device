@@ -43,6 +43,7 @@ import { providerRuntimeOwner } from '@agent-device/contracts/platform';
 import type { LimrunAppLogDescriptor } from './app-log-descriptor.ts';
 import type { LimrunAppLogReader } from './app-log-poller.ts';
 import { buildLimrunClientOptions, LIMRUN_CLIENT_HEADER } from './client-options.ts';
+import type { LimrunRequestOperationDrain } from './request-cancellation.ts';
 import { resolveLimrunRuntimeInstance } from './runtime-instance.ts';
 
 type LimrunInstance = {
@@ -146,7 +147,7 @@ class LimrunRuntimeImplementation implements ProviderDeviceRuntime {
     return parseLimrunDeviceId(device.id) !== undefined;
   }
 
-  hasLiveSession(device: DeviceInfo): boolean {
+  isSessionActive(device: DeviceInfo): boolean {
     return this.getSessionForDevice(device) !== undefined;
   }
 
@@ -168,24 +169,48 @@ class LimrunRuntimeImplementation implements ProviderDeviceRuntime {
     app: string,
     appPath: string,
     options?: ProviderDeviceInstallOptions,
+    signal?: AbortSignal,
+    operationDrain?: LimrunRequestOperationDrain,
   ): Promise<ProviderDeviceInstallResult | undefined> {
-    return await this.installInstallablePath(device, appPath, {
-      ...options,
-      appIdentifierHint: options?.appIdentifierHint ?? app,
-      packageNameHint: options?.packageNameHint ?? app,
-    });
+    return await this.installInstallablePath(
+      device,
+      appPath,
+      {
+        ...options,
+        appIdentifierHint: options?.appIdentifierHint ?? app,
+        packageNameHint: options?.packageNameHint ?? app,
+      },
+      signal,
+      operationDrain,
+    );
   }
 
   async installInstallablePath(
     device: DeviceInfo,
     installablePath: string,
     options?: ProviderDeviceInstallOptions,
+    signal?: AbortSignal,
+    operationDrain?: LimrunRequestOperationDrain,
   ): Promise<ProviderDeviceInstallResult | undefined> {
     const session = this.getSessionForDevice(device);
     if (!session) return undefined;
     return session.platform === 'ios'
-      ? await installLimrunIosApp(this.limrun, session, installablePath, options)
-      : await installLimrunAndroidApp(this.limrun, session, installablePath, options);
+      ? await installLimrunIosApp(
+          this.limrun,
+          session,
+          installablePath,
+          options,
+          signal,
+          operationDrain,
+        )
+      : await installLimrunAndroidApp(
+          this.limrun,
+          session,
+          installablePath,
+          options,
+          signal,
+          operationDrain,
+        );
   }
 
   async configurePortReverse(
@@ -380,7 +405,7 @@ async function loadLimrunPlatformRuntime(
     host,
     runtimeInstance,
     ownsDevice: (device) => runtime.ownsDevice(device),
-    hasLiveSession: (device) => runtime.hasLiveSession(device),
+    isSessionActive: (device) => runtime.isSessionActive(device),
     openCurrent: async (device) => runtime.currentAppLogReader(device),
     reconnect: async (descriptor, signal) =>
       await runtime.reconnectAppLogReader(descriptor, signal),
@@ -410,6 +435,30 @@ async function loadLimrunPlatformRuntime(
       signal.throwIfAborted();
       return { package: state?.appId, activity: state?.activity };
     },
+    deployApp: async (device, input, signal, operationDrain) =>
+      await runtime.installApp(
+        device,
+        input.app,
+        input.appPath,
+        {
+          relaunch: input.replaceExisting,
+          appIdentifierHint: input.app,
+          packageNameHint: input.app,
+        },
+        signal,
+        operationDrain,
+      ),
+    deployMaterializedApp: async (device, input, signal, operationDrain) =>
+      await runtime.installInstallablePath(
+        device,
+        input.artifact.installablePath,
+        {
+          appIdentifierHint: input.artifact.bundleId,
+          packageNameHint: input.artifact.packageName,
+        },
+        signal,
+        operationDrain,
+      ),
   });
 }
 

@@ -152,14 +152,20 @@ async function waitForEmulatorDiscovery(params: {
 async function readAndroidBootProp(
   serial: string,
   timeoutMs = ANDROID_BOOT_PROP_TIMEOUT_MS,
+  signal?: AbortSignal,
 ): Promise<ExecResult> {
   return await runCmd('adb', ['-s', serial, 'shell', 'getprop', 'sys.boot_completed'], {
     allowFailure: true,
+    signal,
     timeoutMs,
   });
 }
 
-export async function waitForAndroidBoot(serial: string, timeoutMs = 60_000): Promise<void> {
+export async function waitForAndroidBoot(
+  serial: string,
+  timeoutMs = 60_000,
+  signal?: AbortSignal,
+): Promise<void> {
   const deadline = Deadline.fromTimeoutMs(timeoutMs);
   const pollMs = Math.min(ANDROID_BOOT_POLL_MS, Math.max(50, Math.floor(timeoutMs / 20)));
   const maxAttempts = Math.max(1, Math.ceil(timeoutMs / pollMs));
@@ -181,6 +187,7 @@ export async function waitForAndroidBoot(serial: string, timeoutMs = 60_000): Pr
         const result = await readAndroidBootProp(
           serial,
           Math.min(remainingMs, ANDROID_BOOT_PROP_TIMEOUT_MS),
+          signal,
         );
         lastBootResult = result;
         if (result.stdout.trim() === '1') return;
@@ -211,6 +218,7 @@ export async function waitForAndroidBoot(serial: string, timeoutMs = 60_000): Pr
       {
         deadline,
         phase: 'boot',
+        signal,
         classifyReason: (error) =>
           classifyBootFailure({
             error,

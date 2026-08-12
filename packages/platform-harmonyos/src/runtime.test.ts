@@ -52,6 +52,17 @@ test.each([
     reason: 'unsupported-platform-leaf',
   });
   expect(facts.operations.appLogInspect).toEqual({ available: true });
+  expect(facts.operations.deployApp).toEqual({ available: true });
+  for (const operation of [
+    'materializeAppSource',
+    'deployMaterializedApp',
+    'sendPushNotification',
+  ] as const) {
+    expect(facts.operations[operation]).toMatchObject({
+      available: false,
+      reason: 'unsupported-platform-leaf',
+    });
+  }
   expect(facts.operations.screenRecordingStart.available).toBe(recordingAvailable);
   expect(facts.operations.screenRecordingReattach.available).toBe(recordingAvailable);
   expect(facts.operations.screenRecordingCleanup.available).toBe(recordingAvailable);

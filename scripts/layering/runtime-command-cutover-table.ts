@@ -12,8 +12,9 @@ import { recordRuntimeDaemonMechanicsViolations } from './record-runtime-mechani
  * mechanism in `runtime-command-cutover-policy.ts` carries one planted-red proof for
  * every row, and `cutoverRowDefects` rejects a row that leaves its claims unstated.
  *
- * Rule ids are per row: the layering report groups violations under R22 appstate,
- * R20 boot, R21 apps, R23 shutdown, R17 devices, R14 logs, R15 network, R16 record.
+ * Rule ids are per row: the layering report groups violations under R20 boot,
+ * R21 apps, R22 appstate, R23 shutdown, R24-R27 install/deploy, R17 devices, R14 logs,
+ * R15 network, and R16 record.
  */
 export const MIGRATED_COMMAND_CUTOVERS: readonly MigratedCommandCutover[] = [
   {
@@ -111,6 +112,113 @@ export const MIGRATED_COMMAND_CUTOVERS: readonly MigratedCommandCutover[] = [
       operations: ['shutdownTarget'],
       operationOwners: {
         shutdownTarget: ['handleSessionStateCommands'],
+      },
+    },
+  },
+  {
+    rule: 'R24 install-runtime-cutover',
+    command: 'install',
+    subject: 'app installation',
+    tier: 'request-scoped',
+    execution: 'device-runtime',
+    legacyRetirement: {
+      modulePaths: ['src/daemon/handlers/session-deploy.ts'],
+      importPatterns: [/(?:^|\/)session-deploy(?:\.[cm]?[jt]s)?$/],
+      routeNames: [
+        'APP_INSTALL_CAPABILITY',
+        'defaultInstallOps',
+        'handleAppDeployCommand',
+        'installProviderDeviceApp',
+      ],
+    },
+    admissionMember: {
+      forms: ['computed-property'],
+      files: ['src/platforms/apple/plugin.ts'],
+      message: 'Apple plugin retains legacy install support or hint closure',
+    },
+    runtimeTypeNames: ['AppDeploymentRuntimeOperations'],
+    operations: { names: ['deployApp'] },
+    singularExecution: {
+      routes: ['handleAppDeploymentCommand'],
+      operations: ['deployApp'],
+      operationOwners: { deployApp: ['handleAppDeploymentCommand'] },
+    },
+  },
+  {
+    rule: 'R25 reinstall-runtime-cutover',
+    command: 'reinstall',
+    subject: 'app reinstallation',
+    tier: 'request-scoped',
+    execution: 'device-runtime',
+    legacyRetirement: {
+      modulePaths: ['src/daemon/handlers/session-deploy.ts'],
+      importPatterns: [/(?:^|\/)session-deploy(?:\.[cm]?[jt]s)?$/],
+      routeNames: [
+        'APP_INSTALL_CAPABILITY',
+        'defaultReinstallOps',
+        'handleAppDeployCommand',
+        'installProviderDeviceApp',
+      ],
+    },
+    admissionMember: {
+      forms: ['computed-property'],
+      files: ['src/platforms/apple/plugin.ts'],
+      message: 'Apple plugin retains legacy reinstall support or hint closure',
+    },
+    runtimeTypeNames: ['AppDeploymentRuntimeOperations'],
+    operations: { names: ['deployApp'] },
+    singularExecution: {
+      routes: ['handleAppDeploymentCommand'],
+      operations: ['deployApp'],
+      operationOwners: { deployApp: ['handleAppDeploymentCommand'] },
+    },
+  },
+  {
+    rule: 'R26 install-source-runtime-cutover',
+    command: 'install_source',
+    subject: 'source installation',
+    tier: 'request-scoped',
+    execution: 'device-runtime',
+    legacyRetirement: {
+      modulePaths: ['src/daemon/handlers/install-source.ts'],
+      routeNames: ['handleInstallFromSourceCommand', 'installProviderDeviceInstallablePath'],
+    },
+    runtimeTypeNames: ['AppDeploymentRuntimeOperations', 'DeviceReadinessRuntimeOperations'],
+    operations: {
+      names: ['ensureReady', 'materializeAppSource', 'deployMaterializedApp'],
+    },
+    singularExecution: {
+      routes: ['handleInstallFromSourceDeploymentCommand'],
+      operations: ['ensureReady', 'materializeAppSource', 'deployMaterializedApp'],
+      operationOwners: {
+        ensureReady: ['handleInstallFromSourceDeploymentCommand'],
+        materializeAppSource: ['handleInstallFromSourceDeploymentCommand'],
+        deployMaterializedApp: ['handleInstallFromSourceDeploymentCommand'],
+      },
+    },
+  },
+  {
+    rule: 'R27 push-runtime-cutover',
+    command: 'push',
+    subject: 'push notification',
+    tier: 'request-scoped',
+    execution: 'device-runtime',
+    legacyRetirement: {
+      routeNames: ['handlePushCommand'],
+    },
+    admissionMember: {
+      forms: ['computed-property'],
+      files: ['src/platforms/apple/plugin.ts'],
+      message: 'Apple plugin retains legacy push support or hint closure',
+    },
+    runtimeTypeNames: ['AppDeploymentRuntimeOperations', 'DeviceReadinessRuntimeOperations'],
+    operations: { names: ['ensureReady', 'sendPushNotification'] },
+    singularExecution: {
+      routes: ['handlePushNotificationCommand'],
+      operations: ['ensureReady', 'sendPushNotification'],
+      operationOwners: {
+        ensureReady: ['handlePushNotificationCommand'],
+        sendPushNotification: ['handlePushNotificationCommand'],
       },
     },
   },

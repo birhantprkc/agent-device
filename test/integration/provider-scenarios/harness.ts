@@ -19,7 +19,9 @@ import { runCmdBackground } from '../../../src/utils/exec.ts';
 import type {
   DeviceInventoryProvider,
   ProviderDeviceInventorySource,
+  ProviderDeviceRuntime,
 } from '@agent-device/contracts/device';
+import type { PlatformRuntimeProviderRegistration } from '../../../src/platform-runtime-gateway.ts';
 import {
   createTestDeviceInventoryGateways,
   createTestDeviceInventoryGatewaysFromProvider,
@@ -65,7 +67,11 @@ export async function createProviderScenarioHarness(
     (
       | { deviceInventoryProvider: DeviceInventoryProvider; deviceInventorySource?: never }
       | { deviceInventorySource: ProviderDeviceInventorySource; deviceInventoryProvider?: never }
-    ) & { platformRuntime?: boolean },
+    ) & {
+      platformRuntime?: boolean;
+      providerRuntimes?: readonly ProviderDeviceRuntime[];
+      providerModules?: readonly PlatformRuntimeProviderRegistration[];
+    },
 ): Promise<ProviderScenarioHarness> {
   const sessionDir = fs.mkdtempSync(
     path.join(os.tmpdir(), 'agent-device-provider-scenario-session-'),
@@ -76,12 +82,16 @@ export async function createProviderScenarioHarness(
     deviceInventorySource,
     deviceRuntimeGateway: configuredDeviceRuntimeGateway,
     platformRuntime,
+    providerRuntimes,
+    providerModules,
     ...routerDeps
   } = deps;
   const deviceRuntimeGateway =
     configuredDeviceRuntimeGateway ??
-    (platformRuntime
+    (platformRuntime || providerRuntimes !== undefined || providerModules !== undefined
       ? createPlatformRuntimeGateway({
+          providerRuntimes,
+          providerModules,
           sessionsDir: sessionDir,
           resolveSessionArtifacts: (sessionId) => ({
             outputPath: sessionStore.resolveAppLogPath(sessionId),

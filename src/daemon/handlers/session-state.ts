@@ -30,6 +30,14 @@ const IOS_APPSTATE_SESSION_REQUIRED_MESSAGE =
 const MACOS_APPSTATE_SESSION_REQUIRED_MESSAGE =
   'macOS appstate requires an active session on the target device. Run open first (for example: open --session macos --platform macos "System Settings").';
 
+type AppStateCommandParams = Readonly<{
+  req: DaemonRequest;
+  sessionName: string;
+  sessionStore: SessionStore;
+  inspectFacts?: InspectDeviceRuntimeFacts;
+  bindDevice?: BindDeviceRuntime;
+}>;
+
 function requireInspectFacts(
   inspectFacts: InspectDeviceRuntimeFacts | undefined,
 ): InspectDeviceRuntimeFacts {
@@ -78,13 +86,7 @@ function hasAndroidAvdIdentity(
   );
 }
 
-async function handleAppStateCommand(params: {
-  req: DaemonRequest;
-  sessionName: string;
-  sessionStore: SessionStore;
-  inspectFacts?: InspectDeviceRuntimeFacts;
-  bindDevice?: BindDeviceRuntime;
-}): Promise<DaemonResponse> {
+async function handleAppStateCommand(params: AppStateCommandParams): Promise<DaemonResponse> {
   const { req, sessionName, sessionStore } = params;
   const session = sessionStore.get(sessionName);
   const flags = req.flags ?? {};

@@ -182,7 +182,9 @@ export type BrowserStackUploadOptions = {
 export async function uploadBrowserStackApp(
   appPath: string,
   options: BrowserStackUploadOptions,
+  signal?: AbortSignal,
 ): Promise<string> {
+  signal?.throwIfAborted();
   const file = await fs.readFile(appPath);
   const form = new FormData();
   form.set('file', new Blob([file]), path.basename(appPath));
@@ -193,6 +195,7 @@ export async function uploadBrowserStackApp(
       Authorization: basicAuthHeader(options),
     },
     body: form,
+    signal,
   });
   const json = (await response.json()) as unknown;
   const appUrl = readBrowserStackAppUrl(json);
@@ -208,8 +211,8 @@ export async function uploadBrowserStackApp(
 export function createBrowserStackUploadApp(
   options: Required<BrowserStackUploadOptions>,
 ): CloudWebDriverUploadApp {
-  return async ({ appPath, options: installOptions }) => {
-    const appReference = await uploadBrowserStackApp(appPath, options);
+  return async ({ appPath, options: installOptions, signal }) => {
+    const appReference = await uploadBrowserStackApp(appPath, options, signal);
     return {
       appReference,
       bundleId: installOptions?.appIdentifierHint,

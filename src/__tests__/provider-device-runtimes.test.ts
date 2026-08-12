@@ -11,7 +11,10 @@ test('default provider runtimes skip Limrun when only the removed API key alias 
     runtimes.some((runtime) => runtime.provider === 'limrun'),
     false,
   );
-  assert.equal(platformModules.length, 0);
+  assert.deepEqual(
+    platformModules.map((registration) => registration.runtime),
+    runtimes,
+  );
   await Promise.all(runtimes.map(async (runtime) => await runtime.shutdown()));
 });
 
@@ -26,7 +29,10 @@ test('default provider runtimes load Limrun when a Limrun API key is configured'
   );
   const limrun = runtimes.find((runtime) => runtime.provider === 'limrun');
   assert.equal(limrun ? 'loadRuntime' in limrun : true, false);
-  assert.equal(platformModules.length, 1);
-  assert.equal(platformModules[0]?.runtime, limrun);
+  assert.equal(platformModules.length, runtimes.length);
+  assert.equal(
+    platformModules.find((registration) => registration.runtime === limrun)?.runtime,
+    limrun,
+  );
   await Promise.all(runtimes.map(async (runtime) => await runtime.shutdown()));
 });

@@ -13,12 +13,15 @@ import { openAppLogOutput, readAppLogOutputTail } from './platform-runtime-app-l
 import { createManagedAppLogProcesses } from './platform-runtime-app-log-process.ts';
 import { createNetworkRuntimeHost } from './platform-runtime-network-host.ts';
 import { createScreenRecordingRuntimeHost } from './platform-runtime-screen-recording-host.ts';
+import { createAppInventoryRuntimeHost } from './platform-runtime-app-inventory-host.ts';
 import { createApplePhysicalReadinessHost } from './platform-runtime-apple-physical-readiness.ts';
 import { createAppleAutomationKeepHotHost } from './platform-runtime-apple-automation-keep-hot.ts';
 import { createAndroidEmulatorHost } from './platform-runtime-android-emulator-host.ts';
-import { createAppInventoryRuntimeHost } from './platform-runtime-app-inventory-host.ts';
 import { createAppStateRuntimeHost } from './platform-runtime-app-state-host.ts';
 import { createDeviceShutdownRuntimeHost } from './platform-runtime-device-shutdown-host.ts';
+import { createAppleAppDeploymentExecutor } from './platform-runtime-apple-deployment-executor.ts';
+import { createAndroidAppDeploymentExecutor } from './platform-runtime-android-deployment-executor.ts';
+import { createHarmonyAppDeploymentExecutor } from './platform-runtime-harmony-deployment-executor.ts';
 
 export function createPlatformRuntimeHost(options: {
   sessionsDir: string;
@@ -77,6 +80,9 @@ export function createPlatformRuntimeHost(options: {
     ...network,
     appInventory: createAppInventoryRuntimeHost(),
     appState: createAppStateRuntimeHost(),
+    appleDeployment: createAppleAppDeploymentExecutor(),
+    androidDeployment: createAndroidAppDeploymentExecutor(),
+    harmonyDeployment: createHarmonyAppDeploymentExecutor(),
     deviceReadiness: Object.freeze({
       applePhysical: createApplePhysicalReadinessHost(),
       appleAutomation: createAppleAutomationKeepHotHost(),

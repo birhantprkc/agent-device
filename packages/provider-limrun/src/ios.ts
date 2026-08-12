@@ -23,6 +23,10 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { flattenIosTree, toIosSelector, writeBase64File, type IosTreeNode } from './snapshot.ts';
 import { normalizeOptionalString } from './strings.ts';
+import {
+  awaitLimrunDeploymentOperation,
+  type LimrunRequestOperationDrain,
+} from './request-cancellation.ts';
 import type { LimrunRuntimeDependencies } from './runtime-dependencies.ts';
 
 export type LimrunIosSession = {
@@ -76,18 +80,35 @@ export async function installLimrunIosApp(
   session: LimrunIosSession,
   installablePath: string,
   options?: ProviderDeviceInstallOptions,
+  signal?: AbortSignal,
+  operationDrain?: LimrunRequestOperationDrain,
 ): Promise<ProviderDeviceInstallResult> {
+  signal?.throwIfAborted();
   const prepared = await prepareLimrunIosAsset(installablePath, session.dependencies);
   try {
-    const asset = await limrun.assets.getOrUpload({
-      path: prepared.uploadPath,
-      name: prepared.assetName,
-    });
-    const result = await installLimrunIosRemoteApp(session, asset.signedDownloadUrl, {
-      md5: asset.md5,
-      relaunch: options?.relaunch,
-      appIdentifierHint: options?.appIdentifierHint,
-    });
+    signal?.throwIfAborted();
+    const asset = await awaitLimrunDeploymentOperation(
+      operationDrain,
+      limrun.assets.getOrUpload(
+        {
+          path: prepared.uploadPath,
+          name: prepared.assetName,
+        },
+        { signal },
+      ),
+      signal,
+    );
+    const result = await installLimrunIosRemoteApp(
+      session,
+      asset.signedDownloadUrl,
+      {
+        md5: asset.md5,
+        relaunch: options?.relaunch,
+        appIdentifierHint: options?.appIdentifierHint,
+      },
+      signal,
+      operationDrain,
+    );
     const bundleId = result.appId;
     return {
       ...(bundleId ? { bundleId, launchTarget: bundleId } : {}),
@@ -102,18 +123,36 @@ export async function installLimrunIosRemoteApp(
   session: LimrunIosSession,
   url: string,
   options?: LimrunIosRemoteInstallOptions,
+  signal?: AbortSignal,
+  operationDrain?: LimrunRequestOperationDrain,
 ): Promise<LimrunIosRemoteInstallResult> {
-  const beforeInstallApps = await session.client.listApps().catch(() => undefined);
-  const result = await session.client.installApp(url, {
-    md5: options?.md5,
-    launchMode: options?.relaunch ? 'RelaunchIfRunning' : 'ForegroundIfRunning',
+  signal?.throwIfAborted();
+  const beforeInstallApps = await awaitLimrunDeploymentOperation(
+    operationDrain,
+    session.client.listApps(),
+    signal,
+  ).catch((error: unknown) => {
+    if (signal?.aborted) throw error;
+    return undefined;
   });
+  const result = await awaitLimrunDeploymentOperation(
+    operationDrain,
+    session.client.installApp(url, {
+      md5: options?.md5,
+      launchMode: options?.relaunch ? 'RelaunchIfRunning' : 'ForegroundIfRunning',
+    }),
+    signal,
+  );
   const resultBundleId = normalizeOptionalString(result.bundleId);
   const requestedBundleId = normalizeOptionalString(options?.appIdentifierHint);
   let afterInstallApps: LimrunIosApp[] = [];
   for (const delayMs of IOS_APP_INVENTORY_RETRY_DELAYS_MS) {
-    if (delayMs > 0) await sleep(delayMs);
-    afterInstallApps = await session.client.listApps();
+    if (delayMs > 0) await sleep(delayMs, undefined, { signal });
+    afterInstallApps = await awaitLimrunDeploymentOperation(
+      operationDrain,
+      session.client.listApps(),
+      signal,
+    );
     const verifiedBundleId = resolveInstalledIosAppId({
       resultBundleId,
       requestedBundleId,

@@ -1,28 +1,33 @@
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
 import { execFailureDetails } from '../../../utils/exec.ts';
-import { prepareIosInstallArtifact } from './install-artifact.ts';
 import { ensureBootedSimulator } from './simulator.ts';
 import { invalidateIosAppResolutionCache, resolveIosApp } from './app-resolution.ts';
 import { isMissingAppErrorOutput, runSimctl } from './apps-simctl.ts';
 import { resolveIosPhysicalDeviceControl } from './physical-device-control.ts';
 
-type InstallIosAppOptions = {
-  appIdentifierHint?: string;
+type IosInstallSignalOptions = {
+  signal?: AbortSignal;
 };
 
-async function uninstallIosApp(device: DeviceInfo, app: string): Promise<{ bundleId: string }> {
+export async function uninstallIosApp(
+  device: DeviceInfo,
+  app: string,
+  options: IosInstallSignalOptions = {},
+): Promise<{ bundleId: string }> {
   return await invalidateIosAppResolutionCache(device, async () => {
+    options.signal?.throwIfAborted();
     const bundleId = await resolveIosApp(device, app);
     if (device.kind !== 'simulator') {
-      await resolveIosPhysicalDeviceControl(device).uninstallApp(device, bundleId);
+      await resolveIosPhysicalDeviceControl(device).uninstallApp(device, bundleId, options.signal);
       return { bundleId };
     }
 
-    await ensureBootedSimulator(device);
+    await ensureBootedSimulator(device, { signal: options.signal });
 
     const result = await runSimctl(device, ['uninstall', device.id, bundleId], {
       allowFailure: true,
+      signal: options.signal,
     });
     if (result.exitCode !== 0) {
       const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
@@ -39,61 +44,23 @@ async function uninstallIosApp(device: DeviceInfo, app: string): Promise<{ bundl
   });
 }
 
-export async function installIosApp(
-  device: DeviceInfo,
-  appPath: string,
-  options?: InstallIosAppOptions,
-): Promise<{
-  archivePath?: string;
-  installablePath: string;
-  bundleId?: string;
-  appName?: string;
-  launchTarget?: string;
-}> {
-  if (device.kind !== 'simulator') {
-    resolveIosPhysicalDeviceControl(device).assertAppInstallationSupported(device);
-  }
-  const prepared = await prepareIosInstallArtifact({ kind: 'path', path: appPath }, options);
-  try {
-    await installIosInstallablePath(device, prepared.installablePath);
-    return {
-      archivePath: prepared.archivePath,
-      installablePath: prepared.installablePath,
-      bundleId: prepared.bundleId,
-      appName: prepared.appName,
-      launchTarget: prepared.bundleId,
-    };
-  } finally {
-    await prepared.cleanup();
-  }
-}
-
-export async function reinstallIosApp(
-  device: DeviceInfo,
-  app: string,
-  appPath: string,
-): Promise<{ bundleId: string }> {
-  if (device.kind !== 'simulator') {
-    resolveIosPhysicalDeviceControl(device).assertAppInstallationSupported(device);
-  }
-  return await invalidateIosAppResolutionCache(device, async () => {
-    const { bundleId } = await uninstallIosApp(device, app);
-    await installIosApp(device, appPath, { appIdentifierHint: app });
-    return { bundleId };
-  });
-}
-
 export async function installIosInstallablePath(
   device: DeviceInfo,
   installablePath: string,
+  options: IosInstallSignalOptions = {},
 ): Promise<void> {
   await invalidateIosAppResolutionCache(device, async () => {
+    options.signal?.throwIfAborted();
     if (device.kind !== 'simulator') {
-      await resolveIosPhysicalDeviceControl(device).installApp(device, installablePath);
+      await resolveIosPhysicalDeviceControl(device).installApp(
+        device,
+        installablePath,
+        options.signal,
+      );
       return;
     }
 
-    await ensureBootedSimulator(device);
-    await runSimctl(device, ['install', device.id, installablePath]);
+    await ensureBootedSimulator(device, { signal: options.signal });
+    await runSimctl(device, ['install', device.id, installablePath], { signal: options.signal });
   });
 }

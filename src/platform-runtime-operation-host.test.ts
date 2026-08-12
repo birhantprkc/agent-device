@@ -1,4 +1,9 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect, test, vi } from 'vitest';
+
+const directory = dirname(fileURLToPath(import.meta.url));
 
 const capabilities = vi.hoisted(() => ({
   appleTools: {
@@ -40,4 +45,14 @@ test('operation host composes the shared lazy Apple-tool and toolchain capabilit
 
   expect(host.appleTools).toBe(capabilities.appleTools);
   expect(host.toolchains).toBe(capabilities.toolchains);
+});
+
+test('composes focused deployment executors instead of a cross-family deployment host', () => {
+  const source = readFileSync(join(directory, 'platform-runtime-operation-host.ts'), 'utf8');
+
+  expect(source).toContain('createAppleAppDeploymentExecutor');
+  expect(source).toContain('createAndroidAppDeploymentExecutor');
+  expect(source).toContain('createHarmonyAppDeploymentExecutor');
+  expect(source).not.toContain('appDeployment:');
+  expect(existsSync(join(directory, 'platform-runtime-app-deployment-host.ts'))).toBe(false);
 });

@@ -60,18 +60,12 @@ const supportsCoreDevicePhysicalOperation = (device: DeviceInfo): boolean =>
   device.platform !== 'apple' ||
   device.kind !== 'device' ||
   device.iosPhysicalDeviceBackend !== 'xctest';
-const supportsAppInstallation = (device: DeviceInfo): boolean =>
-  isNotMacOs(device) && supportsCoreDevicePhysicalOperation(device);
 const coreDeviceOnlyPhysicalOperationHint = (device: DeviceInfo): string | undefined =>
   supportsCoreDevicePhysicalOperation(device)
     ? undefined
     : 'This command requires a CoreDevice-backed physical iOS device. The selected XCTest backend supports open, close, interactions, snapshots, and screenshots.';
 const SUPPORTS_REF: Record<string, (device: DeviceInfo) => boolean> = {
-  install: supportsAppInstallation,
-  reinstall: supportsAppInstallation,
-  'install-from-source': supportsAppInstallation,
   perf: supportsCoreDevicePhysicalOperation,
-  push: isNotMacOs,
   home: isNotMacOs,
   'app-switcher': isNotMacOs,
   clipboard: (device) =>
@@ -97,9 +91,6 @@ const HINT_REF: Record<string, (device: DeviceInfo) => string | undefined> = {
     device.platform === 'apple'
       ? 'viewport resizes web targets only (--platform web). Apple screen geometry is fixed by the selected simulator or device type — open a different simulator to test another screen size.'
       : undefined,
-  install: coreDeviceOnlyPhysicalOperationHint,
-  reinstall: coreDeviceOnlyPhysicalOperationHint,
-  'install-from-source': coreDeviceOnlyPhysicalOperationHint,
   perf: coreDeviceOnlyPhysicalOperationHint,
   'tv-remote': (device) => {
     if (device.platform === 'android') {

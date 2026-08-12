@@ -17,7 +17,8 @@ export function createLimrunRuntimeDependencies(): LimrunRuntimeDependencies {
         return createAndroidPortReverseManager(adb);
       },
       inferAppName: async (packageName) => {
-        const { inferAndroidAppName } = await import('../platforms/android/app-lifecycle.ts');
+        const { inferAndroidAppName } =
+          await import('../platforms/android/app-deployment-resolution.ts');
         return inferAndroidAppName(packageName);
       },
       listApps: async (adb, filter) => {

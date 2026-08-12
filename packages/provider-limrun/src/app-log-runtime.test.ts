@@ -3,29 +3,16 @@ import {
   appsRuntimeUse,
   bootTargetUse,
   narrowDeviceBinding,
-  type PlatformRequestScope,
-  type PlatformRuntimeHost,
 } from '@agent-device/contracts/platform';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { expect, test, vi } from 'vitest';
 import { createLimrunAppLogEnvelope } from './app-log-descriptor.ts';
 import { createLimrunPlatformRuntimeOwner } from './app-log-runtime.ts';
-
-const device: DeviceInfo = {
-  platform: 'apple',
-  appleOs: 'ios',
-  id: 'limrun:ios:lease-a',
-  name: 'Limrun iOS',
-  kind: 'simulator',
-  target: 'mobile',
-  booted: true,
-};
-
-const scope: PlatformRequestScope = {
-  signal: new AbortController().signal,
-  diagnostics: { emit: () => {} },
-  progress: { report: () => {} },
-};
+import {
+  limrunIosDevice as device,
+  limrunRuntimeScope as scope,
+  unusedLimrunRuntimeHost as unusedHost,
+} from './runtime.fixtures.ts';
 
 test('rejects a cross-platform durable descriptor before provider reconnection', async () => {
   const reconnect = vi.fn(async () => ({ status: 'missing' as const }));
@@ -33,7 +20,7 @@ test('rejects a cross-platform durable descriptor before provider reconnection',
     host: unusedHost(),
     runtimeInstance: 'default',
     ownsDevice: () => true,
-    hasLiveSession: () => true,
+    isSessionActive: () => true,
     openCurrent: async () => undefined,
     reconnect,
     listApps: async () => [],
@@ -77,7 +64,7 @@ test('rejects cross-session paths before reconnecting or opening a provider read
     host: unusedHost(),
     runtimeInstance: 'default',
     ownsDevice: () => true,
-    hasLiveSession: () => true,
+    isSessionActive: () => true,
     openCurrent,
     reconnect,
     listApps: async () => [],
@@ -122,7 +109,7 @@ test('keeps exact-owner app-log recovery available without a process-local sessi
     host: unusedHost(),
     runtimeInstance: 'default',
     ownsDevice: () => true,
-    hasLiveSession: () => false,
+    isSessionActive: () => false,
     openCurrent,
     reconnect,
     listApps: async () => [],
@@ -158,21 +145,21 @@ test('keeps exact-owner app-log recovery available without a process-local sessi
   expect(binding.operations.listApps).toBeUndefined();
   expect(binding.facts.operations.appLogInspect).toMatchObject({
     available: false,
-    reason: 'unsupported-provider-mode',
+    reason: 'owner-capability-missing',
   });
   expect(binding.facts.operations.appLogReattach).toEqual({ available: true });
   expect(binding.facts.operations.appLogCleanup).toEqual({ available: true });
   expect(binding.facts.operations.appState).toMatchObject({
     available: false,
-    reason: 'unsupported-provider-mode',
+    reason: 'owner-capability-missing',
   });
   expect(binding.facts.operations.ensureReady).toMatchObject({
     available: false,
-    reason: 'unsupported-provider-mode',
+    reason: 'owner-capability-missing',
   });
   expect(binding.facts.operations.listApps).toMatchObject({
     available: false,
-    reason: 'unsupported-provider-mode',
+    reason: 'owner-capability-missing',
   });
   expect(() => narrowDeviceBinding(binding, appStateUse)).toThrow();
   expect(() => narrowDeviceBinding(binding, bootTargetUse)).toThrow();
@@ -212,7 +199,7 @@ test.each([
     host: unusedHost(),
     runtimeInstance: 'default',
     ownsDevice: () => true,
-    hasLiveSession: () => true,
+    isSessionActive: () => true,
     openCurrent: async () => undefined,
     reconnect,
     listApps: async () => [],
@@ -252,7 +239,7 @@ test('serves provider-owned network from the canonical session app log without l
     },
     runtimeInstance: 'default',
     ownsDevice: () => true,
-    hasLiveSession: () => true,
+    isSessionActive: () => true,
     openCurrent: async () => undefined,
     reconnect: async () => ({ status: 'missing' }),
     listApps: async () => [],
@@ -275,6 +262,37 @@ test('serves provider-owned network from the canonical session app log without l
   expect(commandRun).not.toHaveBeenCalled();
 });
 
+test('keeps fenced app-log recovery bindable after live Limrun deployment admission closes', async () => {
+  const owner = createLimrunPlatformRuntimeOwner({
+    host: unusedHost(),
+    runtimeInstance: 'default',
+    ownsDevice: () => true,
+    isSessionActive: () => false,
+    openCurrent: async () => undefined,
+    reconnect: async () => ({ status: 'missing' }),
+    listApps: async () => [],
+    getAppState: async () => ({}),
+  });
+
+  const binding = await owner.bind({
+    device,
+    intent: {
+      kind: 'exact-owner',
+      owner: owner.owner,
+      fence: { token: 'fence', generation: 1 },
+    },
+    scope,
+  });
+
+  expect(binding.facts.operations.ensureReady).toMatchObject({
+    available: false,
+    reason: 'owner-capability-missing',
+  });
+  expect(binding.facts.operations.appLogStart).toMatchObject({ available: false });
+  expect(binding.facts.operations.appLogReattach).toEqual({ available: true });
+  expect(binding.operations.appLogReattach).toBeTypeOf('function');
+});
+
 test.each([
   ['iOS simulator', device],
   [
@@ -293,7 +311,7 @@ test.each([
     host: unusedHost(),
     runtimeInstance: 'default',
     ownsDevice: () => true,
-    hasLiveSession: () => true,
+    isSessionActive: () => true,
     openCurrent: async () => undefined,
     reconnect: async () => ({ status: 'missing' }),
     listApps: async () => [],
@@ -314,6 +332,14 @@ test.each([
     available: false,
     reason: 'unsupported-provider-mode',
   });
+  for (const operation of [
+    'deployApp',
+    'materializeAppSource',
+    'deployMaterializedApp',
+    'sendPushNotification',
+  ] as const) {
+    expect(binding.facts.operations[operation]).toMatchObject({ available: false });
+  }
   await expect(binding.operations.ensureReady?.({})).resolves.toMatchObject({
     id: runtimeDevice.id,
     booted: true,
@@ -349,7 +375,7 @@ test('fails closed for a stale Android identity before exposing facts or binding
     host: unusedHost(),
     runtimeInstance: 'default',
     ownsDevice: () => true,
-    hasLiveSession: () => false,
+    isSessionActive: () => false,
     openCurrent: async () => undefined,
     reconnect: async () => ({ status: 'missing' }),
     listApps: async () => [],
@@ -359,11 +385,11 @@ test('fails closed for a stale Android identity before exposing facts or binding
   const facts = await owner.inspectFacts(staleDevice);
   expect(facts.operations.ensureReady).toMatchObject({
     available: false,
-    reason: 'unsupported-provider-mode',
+    reason: 'owner-capability-missing',
   });
   expect(facts.operations.appState).toMatchObject({
     available: false,
-    reason: 'unsupported-provider-mode',
+    reason: 'owner-capability-missing',
   });
   await expect(
     owner.bind({ device: staleDevice, intent: { kind: 'ordinary' }, scope }),
@@ -373,113 +399,3 @@ test('fails closed for a stale Android identity before exposing facts or binding
   });
   expect(getAppState).not.toHaveBeenCalled();
 });
-
-function unusedHost(): PlatformRuntimeHost {
-  return {
-    appleTools: {
-      isXcrunAvailable: async () => false,
-      run: async () => {
-        throw new Error('unused');
-      },
-    },
-    toolchains: { prepare: async () => undefined },
-    artifacts: {
-      resolveSession: (sessionId) => ({
-        outputPath: `/sessions/${sessionId}/app.log`,
-        pidPath: `/sessions/${sessionId}/app-log.pid`,
-      }),
-    },
-    commands: {
-      which: async () => undefined,
-      run: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
-    },
-    outputs: {
-      readTail: async () => '',
-      openAppend: async () => {
-        throw new Error('unused');
-      },
-    },
-    processTransports: {
-      resolve: async () => ({ mode: 'local' }),
-    },
-    processes: {
-      start: async () => {
-        throw new Error('unused');
-      },
-      readMarker: async () => ({ status: 'missing' }),
-      clearMarker: async () => {},
-      inspect: async () => 'missing',
-      terminate: async () => 'already-missing',
-    },
-    clock: { now: () => 1, sleep: async () => {} },
-    appLogs: {
-      readRecent: async () => ({
-        path: '/sessions/session/app.log',
-        exists: false,
-        text: '',
-        skippedLines: 0,
-      }),
-      readProcessMarker: async () => ({ status: 'missing' }),
-    },
-    networkTransports: { resolve: async () => ({ mode: 'local' }) },
-    appInventory: {
-      apple: { listApps: async () => [] },
-      android: { listApps: async () => [] },
-      harmonyos: { listApps: async () => [] },
-    },
-    appState: {
-      android: { run: async () => ({ stdout: '' }) },
-      harmonyos: { run: async () => ({ stdout: '' }) },
-    },
-    deviceReadiness: {
-      applePhysical: { ensureConnected: async () => {} },
-      appleAutomation: { keepHot: () => {} },
-      androidEmulator: { discover: async () => [], launch: () => 1, terminate: async () => {} },
-    },
-    deviceShutdown: {
-      apple: {
-        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
-      },
-      android: {
-        shutdownTarget: async () => ({ success: true, exitCode: 0, stdout: '', stderr: '' }),
-      },
-    },
-    screenRecording: unusedScreenRecordingHost(),
-  };
-}
-
-function unusedScreenRecordingHost(): PlatformRuntimeHost['screenRecording'] {
-  return {
-    outputs: { prepare: async () => {} },
-    apple: {
-      availability: async () => ({ available: true }),
-      runRunner: async () => ({}),
-      startSimulator: async () => {
-        throw new Error('unused');
-      },
-      inspectProcess: async () => 'missing',
-      terminateProcess: async () => 'already-missing',
-      inspectRunner: async () => 'missing',
-      retrieveRunnerRecording: async () => {},
-      captureClockAnchor: async () => undefined,
-      isRunnerBundleId: async () => false,
-    },
-    android: {
-      resolve: async () => {
-        throw new Error('unused');
-      },
-    },
-    harmony: {
-      start: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
-      stop: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
-      findMedia: async () => undefined,
-      stageMedia: async () => false,
-      stagedFileSize: async () => undefined,
-      pull: async () => ({ stdout: '', stderr: '', exitCode: 0 }),
-      remove: async () => true,
-      removeMedia: async () => true,
-    },
-    web: { resolve: async () => undefined },
-    finalize: { complete: async () => ({}) },
-  };
-}

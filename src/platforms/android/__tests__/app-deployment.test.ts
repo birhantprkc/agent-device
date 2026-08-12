@@ -1,16 +1,14 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { installAndroidInstallablePath } from '../app-deployment.ts';
 import {
   inferAndroidAppName,
-  installAndroidApp,
-  installAndroidInstallablePath,
-  parseAndroidLaunchComponent,
   resolveAndroidApp,
-} from '../app-lifecycle.ts';
+  withAndroidAppResolutionCacheInvalidated,
+} from '../app-deployment-resolution.ts';
 import { withAndroidAdbProvider } from '../adb-executor.ts';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { assertRejectsAppError, withFakeAdb } from '../../../__tests__/test-utils/index.ts';
@@ -22,22 +20,6 @@ import { mkdtempForTest } from '../../../__tests__/test-utils/tmp-dir.ts';
 // fallback and appear as `install ...` calls. bundletool is not adb: the .aab
 // tests still shape it via PATH because production shells out to it directly.
 
-test('parseAndroidLaunchComponent extracts final resolved component', () => {
-  const stdout = [
-    'priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true',
-    'com.boatsgroup.boattrader/com.boatsgroup.boattrader.MainActivity',
-  ].join('\n');
-  assert.equal(
-    parseAndroidLaunchComponent(stdout),
-    'com.boatsgroup.boattrader/com.boatsgroup.boattrader.MainActivity',
-  );
-});
-
-test('parseAndroidLaunchComponent returns null when no component is present', () => {
-  const stdout = 'No activity found';
-  assert.equal(parseAndroidLaunchComponent(stdout), null);
-});
-
 test('inferAndroidAppName derives readable names from package ids', () => {
   assert.equal(inferAndroidAppName('com.android.settings'), 'Settings');
   assert.equal(inferAndroidAppName('com.google.android.apps.maps'), 'Maps');
@@ -47,13 +29,13 @@ test('inferAndroidAppName derives readable names from package ids', () => {
   assert.equal(inferAndroidAppName('com.android.app.services'), 'Services');
 });
 
-test('installAndroidApp installs .apk via adb install -r', async () => {
+test('installAndroidInstallablePath installs .apk via adb install -r', async () => {
   const apkPath = path.join(os.tmpdir(), `agent-device-test-${Date.now()}.apk`);
   await fs.writeFile(apkPath, 'placeholder', 'utf8');
   await withFakeAdb(
     () => undefined,
     async ({ calls, device }) => {
-      await installAndroidApp(device, apkPath);
+      await installAndroidInstallablePath(device, apkPath);
       const flat = calls.map((args) => args.join(' '));
       assert.ok(
         flat.some((call) => /^install -r .*agent-device-test-.*\.apk$/.test(call)),
@@ -97,69 +79,7 @@ test('installAndroidInstallablePath uses provider install capability when availa
   assert.deepEqual(installCalls, [{ source: apkPath, replace: true }]);
 });
 
-test('installAndroidApp resolves packageName and launchTarget from nested archive artifacts', async () => {
-  const tmpDir = await mkdtempForTest('agent-device-android-install-archive-');
-  const archivePath = path.join(tmpDir, 'Sample.zip');
-  const manifestDir = path.join(tmpDir, 'manifest');
-  const nestedDir = path.join(tmpDir, 'nested');
-  await fs.mkdir(manifestDir);
-  await fs.mkdir(nestedDir);
-  await fs.writeFile(
-    path.join(manifestDir, 'AndroidManifest.xml'),
-    '<manifest package="com.example.archive" />',
-    'utf8',
-  );
-  execFileSync('zip', ['-qr', path.join(nestedDir, 'Sample.apk'), 'AndroidManifest.xml'], {
-    cwd: manifestDir,
-  });
-  execFileSync('zip', ['-qr', archivePath, 'nested'], { cwd: tmpDir });
-
-  try {
-    // The package name must come from the extracted manifest, so `pm list
-    // packages` only answers if the install already happened — and the
-    // assertions below prove it is never consulted at all.
-    let installed = false;
-    await withFakeAdb(
-      (args) => {
-        if (
-          args[0] === 'shell' &&
-          args[1] === 'pm' &&
-          args[2] === 'list' &&
-          args[3] === 'packages'
-        ) {
-          return installed ? 'package:com.example.archive' : '';
-        }
-        if (args[0] === 'install' && args[1] === '-r') {
-          installed = true;
-          return undefined;
-        }
-        return undefined;
-      },
-      async ({ calls, device }) => {
-        const result = await installAndroidApp(device, archivePath);
-        const flat = calls.map((args) => args.join(' '));
-        assert.equal(result.archivePath, archivePath);
-        assert.equal(result.packageName, 'com.example.archive');
-        assert.equal(result.appName, 'Archive');
-        assert.equal(result.launchTarget, 'com.example.archive');
-        assert.equal(result.installablePath.endsWith('/nested/Sample.apk'), true);
-        assert.ok(
-          flat.some((call) => /^install -r .*nested\/Sample\.apk$/.test(call)),
-          flat.join('; '),
-        );
-        assert.equal(
-          flat.some((call) => call.startsWith('shell pm list packages')),
-          false,
-          flat.join('; '),
-        );
-      },
-    );
-  } finally {
-    await fs.rm(tmpDir, { recursive: true, force: true });
-  }
-});
-
-test('installAndroidApp installs .aab via bundletool build-apks + install-apks', async () => {
+test('installAndroidInstallablePath installs .aab via bundletool build-apks + install-apks', async () => {
   const tmpDir = await mkdtempForTest('agent-device-android-install-aab-');
   const bundletoolPath = path.join(tmpDir, 'bundletool');
   const argsLogPath = path.join(tmpDir, 'args.log');
@@ -206,7 +126,7 @@ test('installAndroidApp installs .aab via bundletool build-apks + install-apks',
     await withFakeAdb(
       () => undefined,
       async ({ calls, device }) => {
-        await installAndroidApp(device, aabPath);
+        await installAndroidInstallablePath(device, aabPath);
         const logged = await fs.readFile(argsLogPath, 'utf8');
         assert.match(logged, /bundletool build-apks .*--bundle .*Sample\.aab .*--mode universal/);
         assert.match(logged, /bundletool install-apks .*--device-id emulator-5554/);
@@ -234,7 +154,7 @@ test('installAndroidApp installs .aab via bundletool build-apks + install-apks',
   }
 });
 
-test('installAndroidApp .aab reports missing bundletool tooling', async () => {
+test('installAndroidInstallablePath .aab reports missing bundletool tooling', async () => {
   const tmpDir = await mkdtempForTest('agent-device-android-install-aab-missing-tool-');
   const aabPath = path.join(tmpDir, 'Sample.aab');
   await fs.writeFile(aabPath, 'placeholder', 'utf8');
@@ -250,7 +170,7 @@ test('installAndroidApp .aab reports missing bundletool tooling', async () => {
     await withFakeAdb(
       () => undefined,
       async ({ device }) => {
-        await assertRejectsAppError(() => installAndroidApp(device, aabPath), {
+        await assertRejectsAppError(() => installAndroidInstallablePath(device, aabPath), {
           code: 'TOOL_MISSING',
           message: /bundletool/i,
         });
@@ -267,7 +187,7 @@ test('installAndroidApp .aab reports missing bundletool tooling', async () => {
   }
 });
 
-test('installAndroidApp .aab rejects relative AGENT_DEVICE_BUNDLETOOL_JAR overrides', async () => {
+test('installAndroidInstallablePath .aab rejects relative AGENT_DEVICE_BUNDLETOOL_JAR overrides', async () => {
   const tmpDir = await mkdtempForTest('agent-device-android-install-aab-relative-jar-');
   const aabPath = path.join(tmpDir, 'Sample.aab');
   await fs.writeFile(aabPath, 'placeholder', 'utf8');
@@ -282,7 +202,9 @@ test('installAndroidApp .aab rejects relative AGENT_DEVICE_BUNDLETOOL_JAR overri
     await withFakeAdb(
       () => undefined,
       async ({ device }) => {
-        await assert.rejects(() => installAndroidApp(device, aabPath), { code: 'INVALID_ARGS' });
+        await assert.rejects(() => installAndroidInstallablePath(device, aabPath), {
+          code: 'INVALID_ARGS',
+        });
       },
     );
   } finally {
@@ -371,14 +293,44 @@ test('installAndroidInstallablePath invalidates cached display-name package matc
   }
 });
 
-test('parseAndroidLaunchComponent handles multi-entry resolve output', () => {
-  // Some devices return extra metadata lines before the component
-  const stdout = [
-    'priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=true',
-    'com.microsoft.office.outlook/com.microsoft.office.outlook.ui.miit.MiitLauncherActivity',
-  ].join('\n');
-  assert.equal(
-    parseAndroidLaunchComponent(stdout),
-    'com.microsoft.office.outlook/com.microsoft.office.outlook.ui.miit.MiitLauncherActivity',
+test('Android deployment cache bracket clears fuzzy targets before and after a partial failure', async () => {
+  let packages = ['com.example.stalemaps'];
+  await withFakeAdb(
+    (args) => {
+      if (args.join(' ') === 'shell pm list packages') {
+        return packages.map((packageName) => `package:${packageName}`).join('\n');
+      }
+      return { stderr: `unexpected args: ${args.join(' ')}`, exitCode: 1 };
+    },
+    async ({ device }) => {
+      const before = await resolveAndroidApp(device, 'maps');
+      packages = ['com.example.currentmaps'];
+
+      await assert.rejects(
+        async () =>
+          await withAndroidAppResolutionCacheInvalidated(device, async () => {
+            assert.deepEqual(await resolveAndroidApp(device, 'maps'), {
+              type: 'package',
+              value: 'com.example.currentmaps',
+            });
+            packages = ['com.example.replacementmaps'];
+            throw new Error('replacement materialization failed');
+          }),
+        /replacement materialization failed/,
+      );
+
+      const after = await resolveAndroidApp(device, 'maps');
+      assert.deepEqual(before, { type: 'package', value: 'com.example.stalemaps' });
+      assert.deepEqual(after, { type: 'package', value: 'com.example.replacementmaps' });
+    },
+    {
+      device: {
+        platform: 'android',
+        id: 'emulator-cache-bracket',
+        name: 'Pixel',
+        kind: 'emulator',
+        booted: true,
+      },
+    },
   );
 });

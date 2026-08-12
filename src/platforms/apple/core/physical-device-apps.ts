@@ -20,6 +20,7 @@ export async function listCoreDeviceApps(
 export async function installCoreDeviceApp(
   device: DeviceInfo,
   installablePath: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   await runIosDevicectl(
     ['device', 'install', 'app', '--device', device.id, installablePath],
@@ -28,16 +29,22 @@ export async function installCoreDeviceApp(
       deviceId: device.id,
     },
     {
+      signal,
       timeoutMs: IOS_DEVICE_INSTALL_TIMEOUT_MS,
     },
   );
 }
 
-export async function uninstallCoreDeviceApp(device: DeviceInfo, bundleId: string): Promise<void> {
+export async function uninstallCoreDeviceApp(
+  device: DeviceInfo,
+  bundleId: string,
+  signal?: AbortSignal,
+): Promise<void> {
   await runIosDevicectl(
     ['device', 'uninstall', 'app', '--device', device.id, bundleId],
     { action: `uninstall iOS app ${bundleId}`, deviceId: device.id },
     {
+      signal,
       tolerateOutput: (stdout, stderr) =>
         isMissingAppErrorOutput(`${stdout}\n${stderr}`.toLowerCase()),
     },

@@ -40,6 +40,25 @@ export {
   isHostSystemAudioProbeDevice,
 } from '../audio-probe-support.ts';
 export type { PlatformPlugin } from '../platform-plugin.ts';
+export type {
+  AndroidAppDeploymentExecutor,
+  AppDeploymentInput,
+  AppDeploymentResult,
+  AppDeploymentRuntimeOperations,
+  AppDeploymentSource,
+  AppleAppDeploymentExecutor,
+  DeployMaterializedAppInput,
+  HarmonyAppDeploymentExecutor,
+  MaterializedAppSource,
+  MaterializeAppSourceInput,
+  PushNotificationInput,
+  PushNotificationResult,
+} from '../app-deployment-runtime.ts';
+export {
+  deployAppUse,
+  readyMaterializeAndDeployAppUse,
+  readySendPushNotificationUse,
+} from '../app-deployment-runtime-plan.ts';
 export { assertCommandPlatformExecution } from '../command-platform-execution.ts';
 export type { CommandPlatformExecution } from '../command-platform-execution.ts';
 export { AsyncCleanupStack, PendingTransferGuard } from '../async-lifecycle.ts';

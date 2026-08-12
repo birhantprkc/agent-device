@@ -21,8 +21,16 @@ export async function createDefaultProviderRuntimeComposition(
   env: DefaultProviderDeviceRuntimeEnv = process.env,
 ): Promise<DefaultProviderRuntimeComposition> {
   const runtimes = providerWebDriver.createDefaultRuntimes(env);
+  const platformModules: PlatformRuntimeProviderRegistration[] = runtimes.map((runtime) =>
+    Object.freeze({ runtime, module: runtime.platformRuntimeModule }),
+  );
   const apiKey = env.LIMRUN_API_KEY?.trim();
-  if (!apiKey) return Object.freeze({ runtimes, platformModules: [] });
+  if (!apiKey) {
+    return Object.freeze({
+      runtimes: Object.freeze([...runtimes]),
+      platformModules: Object.freeze(platformModules),
+    });
+  }
 
   const [limrunRuntime, dependencies] = await Promise.all([
     import('@agent-device/provider-limrun'),
@@ -39,6 +47,7 @@ export async function createDefaultProviderRuntimeComposition(
   return Object.freeze({
     runtimes: Object.freeze([...runtimes, registration.runtime]),
     platformModules: Object.freeze([
+      ...platformModules,
       { runtime: registration.runtime, module: registration.platformModule },
     ]),
   });

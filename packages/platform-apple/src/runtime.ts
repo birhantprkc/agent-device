@@ -13,6 +13,10 @@ import {
   appleScreenRecordingFacts,
   createAppleScreenRecordingOperations,
 } from './recording/runtime.ts';
+import {
+  appleAppDeploymentFacts,
+  createAppleAppDeploymentOperations,
+} from './deployment/runtime.ts';
 import { ensureAppleReady } from './readiness/runtime.ts';
 
 const owner = localRuntimeOwner('apple');
@@ -64,6 +68,7 @@ export function createApplePlatformRuntime(host: PlatformRuntimeHost): PlatformR
   const appLogs = createAppleAppLogRuntime(host);
   const inspectFacts = async (device: DeviceInfo) => {
     const logs = await appLogs.inspectFacts(device);
+    const deployment = appleAppDeploymentFacts(device);
     const leafRecordingFacts = appleScreenRecordingFacts(device);
     const hostAvailability = leafRecordingFacts.available
       ? await host.screenRecording.apple.availability(device)
@@ -83,6 +88,7 @@ export function createApplePlatformRuntime(host: PlatformRuntimeHost): PlatformR
       device: logs.device,
       operations: {
         ...logs.operations,
+        ...deployment,
         appState: appStateUnavailable,
         networkDump: available,
         screenRecordingStart: recordingFacts,
@@ -110,6 +116,11 @@ export function createApplePlatformRuntime(host: PlatformRuntimeHost): PlatformR
         facts,
         operations: Object.freeze({
           ...logs.operations,
+          ...createAppleAppDeploymentOperations({
+            executor: host.appleDeployment,
+            device: request.device,
+            signal: request.scope.signal,
+          }),
           networkDump: async (input: NetworkDumpInput) =>
             await dumpAppleNetworkTraffic(host, request.device, input, request.scope.signal),
           ...(recordingFacts.available

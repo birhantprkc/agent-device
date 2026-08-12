@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { CloudArtifactsResult } from '@agent-device/contracts/observability';
-import type { LeaseLifecycleContext, ProviderDeviceRuntime } from '@agent-device/contracts/device';
+import type { LeaseLifecycleContext } from '@agent-device/contracts/device';
 import { AppError } from '@agent-device/kernel/errors';
 import type { ProviderWebDriverDependencies } from './dependencies.ts';
 import {
@@ -30,6 +30,7 @@ import {
   buildCloudWebDriverBaseCapabilities,
   createCloudWebDriverRuntime,
   type CloudWebDriverPlatform,
+  type CloudWebDriverRuntime,
 } from './runtime.ts';
 
 export type DefaultCloudWebDriverArtifactEnv = {
@@ -53,7 +54,7 @@ export type DefaultCloudWebDriverProviderRuntimeEnv = DefaultCloudWebDriverArtif
 
 export type CloudWebDriverProviderDefinition = {
   provider: CloudWebDriverKnownProviderName;
-  createRuntime: (env: DefaultCloudWebDriverProviderRuntimeEnv) => ProviderDeviceRuntime;
+  createRuntime: (env: DefaultCloudWebDriverProviderRuntimeEnv) => CloudWebDriverRuntime;
   listArtifactsFromEnv: (
     providerSessionId: string,
     env: DefaultCloudWebDriverArtifactEnv,

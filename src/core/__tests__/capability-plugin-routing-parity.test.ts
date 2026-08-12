@@ -121,8 +121,6 @@ const supportsCoreDevicePhysicalOperation = (device: DeviceInfo): boolean =>
   device.platform !== 'apple' ||
   device.kind !== 'device' ||
   device.iosPhysicalDeviceBackend !== 'xctest';
-const supportsAppInstallation = (device: DeviceInfo): boolean =>
-  isNotMacOs(device) && supportsCoreDevicePhysicalOperation(device);
 const coreDeviceOnlyPhysicalOperationHint = (device: DeviceInfo): string | undefined =>
   supportsCoreDevicePhysicalOperation(device)
     ? undefined
@@ -131,11 +129,7 @@ const coreDeviceOnlyPhysicalOperationHint = (device: DeviceInfo): string | undef
 // end-to-end assertions cross-check this map against production: a command that
 // gains/loses a closure (or whose closure body changes) breaks parity.
 const SUPPORTS_REF: Record<string, (device: DeviceInfo) => boolean> = {
-  install: supportsAppInstallation,
-  reinstall: supportsAppInstallation,
-  'install-from-source': supportsAppInstallation,
   perf: supportsCoreDevicePhysicalOperation,
-  push: isNotMacOs,
   home: isNotMacOs,
   'app-switcher': isNotMacOs,
   clipboard: (device) =>
@@ -157,9 +151,6 @@ const HINT_REF: Record<string, (device: DeviceInfo) => string | undefined> = {
     device.platform === 'apple'
       ? 'viewport resizes web targets only (--platform web). Apple screen geometry is fixed by the selected simulator or device type — open a different simulator to test another screen size.'
       : undefined,
-  install: coreDeviceOnlyPhysicalOperationHint,
-  reinstall: coreDeviceOnlyPhysicalOperationHint,
-  'install-from-source': coreDeviceOnlyPhysicalOperationHint,
   perf: coreDeviceOnlyPhysicalOperationHint,
   'tv-remote': (device) => {
     if (device.platform === 'android') {
@@ -198,12 +189,10 @@ const HARMONYOS_SUPPORTED_COMMANDS_REF = new Set([
   'get',
   'home',
   'gesture',
-  'install',
   'keyboard',
   'is',
   'longpress',
   'press',
-  'reinstall',
   'screenshot',
   'scroll',
   'settings',
@@ -291,14 +280,12 @@ test('HarmonyOS static capabilities omit runtime-backed command admissions', () 
     'gesture',
     'get',
     'home',
-    'install',
     'is',
     'keyboard',
     'longpress',
     'open',
     'perf',
     'press',
-    'reinstall',
     'screenshot',
     'scroll',
     'settings',
@@ -329,13 +316,34 @@ test('(b.2) unsupportedHint closures are verbatim across the full device matrix'
   }
 });
 
-test('the capability catalog includes runtime-backed commands without restoring legacy admission', () => {
-  assert.ok(listCapabilityCommands().includes('boot'));
-  assert.ok(listCapabilityCommands().includes('logs'));
-  assert.ok(listCapabilityCommands().includes('network'));
-  assert.equal(BASE_COMMAND_CAPABILITY_MATRIX['boot'], undefined);
-  assert.equal(BASE_COMMAND_CAPABILITY_MATRIX['logs'], undefined);
-  assert.equal(BASE_COMMAND_CAPABILITY_MATRIX['network'], undefined);
+test('the capability catalog includes fact-backed commands without restoring legacy admission', () => {
+  const factBackedCommands = [
+    'boot',
+    'logs',
+    'network',
+    'install',
+    'reinstall',
+    'push',
+    'install-from-source',
+  ];
+  for (const command of factBackedCommands) {
+    assert.ok(listCapabilityCommands().includes(command), `${command} stays discoverable`);
+    assert.equal(
+      BASE_COMMAND_CAPABILITY_MATRIX[command],
+      undefined,
+      `${command} has no capability bucket`,
+    );
+  }
+  assert.equal(
+    listCapabilityCommands().includes('install_source'),
+    false,
+    'internal runtime commands are not advertised as public capabilities',
+  );
+  assert.equal(
+    BASE_COMMAND_CAPABILITY_MATRIX.install_source,
+    undefined,
+    'internal source deployment has no capability bucket',
+  );
 });
 
 test('(b.2) the Apple plugin carries exactly the relocated supports/hint closures', () => {

@@ -1,70 +1,50 @@
-import { test, expect, vi, beforeEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import { beforeEach, expect, test, vi } from 'vitest';
 import { mkdtempForTestSync } from '../../../__tests__/test-utils/tmp-dir.ts';
+import { trackUploadedArtifact } from '../../artifact-tracking.ts';
+import type {
+  BindDeviceRuntime,
+  InspectDeviceRuntimeFacts,
+} from '../../request-runtime-binding.ts';
+import { SessionStore } from '../../session-store.ts';
+import type { DaemonRequest, DaemonResponse, SessionState } from '../../types.ts';
 
 vi.mock('../../../core/dispatch.ts', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../core/dispatch.ts')>();
-  return { ...actual, dispatchCommand: vi.fn(async () => ({})), resolveTargetDevice: vi.fn() };
-});
-vi.mock('../../device-ready.ts', () => ({ ensureDeviceReady: vi.fn(async () => {}) }));
-vi.mock('../session-deploy.ts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../session-deploy.ts')>();
-  return {
-    ...actual,
-    defaultInstallOps: { ios: vi.fn(), android: vi.fn(), harmonyos: vi.fn() },
-    defaultReinstallOps: { ios: vi.fn(), android: vi.fn(), harmonyos: vi.fn() },
-  };
+  return { ...actual, resolveTargetDevice: vi.fn() };
 });
 
-import fs from 'node:fs';
-import path from 'node:path';
-import { handleSessionCommands } from './session-command-harness.ts';
-import { trackUploadedArtifact } from '../../artifact-tracking.ts';
-import { SessionStore } from '../../session-store.ts';
-import type { DaemonRequest, DaemonResponse, SessionState } from '../../types.ts';
 import { resolveTargetDevice } from '../../../core/dispatch.ts';
-import { ensureDeviceReady } from '../../device-ready.ts';
-import { defaultInstallOps, defaultReinstallOps } from '../session-deploy.ts';
-
-const mockResolveTargetDevice = vi.mocked(resolveTargetDevice);
-const mockEnsureDeviceReady = vi.mocked(ensureDeviceReady);
-const mockDefaultInstallOpsAndroid = vi.mocked(defaultInstallOps.android);
-const mockDefaultReinstallOpsIos = vi.mocked(defaultReinstallOps.ios);
-const mockDefaultReinstallOpsAndroid = vi.mocked(defaultReinstallOps.android);
-const mockDefaultReinstallOpsHarmony = vi.mocked(defaultReinstallOps.harmonyos);
-
-beforeEach(() => {
-  mockResolveTargetDevice.mockReset();
-  mockEnsureDeviceReady.mockReset();
-  mockEnsureDeviceReady.mockResolvedValue(undefined);
-  mockDefaultInstallOpsAndroid.mockReset();
-  mockDefaultReinstallOpsIos.mockReset();
-  mockDefaultReinstallOpsAndroid.mockReset();
-  mockDefaultReinstallOpsHarmony.mockReset();
-});
+import {
+  handleSessionCommands,
+  mockBindDeviceRuntime,
+  mockDeployAppRuntime,
+  mockInspectDeviceRuntimeFacts,
+} from './session-command-harness.ts';
 
 function makeStore(): SessionStore {
-  const tempRoot = mkdtempForTestSync('agent-device-session-app-deploy-');
-  return new SessionStore(path.join(tempRoot, 'sessions'));
+  return new SessionStore(
+    path.join(mkdtempForTestSync('agent-device-session-app-deploy-'), 'sessions'),
+  );
 }
 
 function makeSession(name: string, device: SessionState['device']): SessionState {
-  return {
-    name,
-    device,
-    createdAt: Date.now(),
-    actions: [],
-  };
+  return { name, device, createdAt: Date.now(), actions: [] };
 }
 
-const invoke = async (_req: DaemonRequest): Promise<DaemonResponse> => {
-  return {
-    ok: false,
-    error: { code: 'INVALID_ARGS', message: 'invoke should not be called in app deploy tests' },
-  };
-};
+const invoke = async (_req: DaemonRequest): Promise<DaemonResponse> => ({
+  ok: false,
+  error: { code: 'INVALID_ARGS', message: 'invoke should not be called in app deploy tests' },
+});
+
+beforeEach(() => {
+  mockDeployAppRuntime.mockReset();
+  mockDeployAppRuntime.mockResolvedValue({});
+  vi.mocked(resolveTargetDevice).mockReset();
+});
 
 test('reinstall requires active session or explicit device selector', async () => {
-  const sessionStore = makeStore();
   const response = await handleSessionCommands({
     req: {
       token: 't',
@@ -75,29 +55,30 @@ test('reinstall requires active session or explicit device selector', async () =
     },
     sessionName: 'default',
     logPath: '/tmp/daemon.log',
-    sessionStore,
+    sessionStore: makeStore(),
     invoke,
   });
-  expect(response).toBeTruthy();
-  if (!response) return;
-  expect(response.ok).toBe(false);
-  if (!response.ok) {
-    expect(response.error.code).toBe('INVALID_ARGS');
-    expect(response.error.message).toMatch(/active session or an explicit device selector/i);
-  }
+  expect(response).toMatchObject({
+    ok: false,
+    error: { code: 'INVALID_ARGS' },
+  });
+  if (response?.ok !== false) return;
+  expect(response.error.message).toMatch(/active session or an explicit device selector/i);
 });
 
-test('reinstall validates required args before device operations', async () => {
-  const sessionStore = makeStore();
-  const session = makeSession('default', {
-    platform: 'apple',
-    id: 'sim-1',
-    name: 'iPhone',
-    kind: 'simulator',
-    booted: true,
-  });
-  sessionStore.set('default', session);
-  mockResolveTargetDevice.mockResolvedValue(session.device!);
+test('reinstall validates required args before runtime admission', async () => {
+  const store = makeStore();
+  store.set(
+    'default',
+    makeSession('default', {
+      platform: 'apple',
+      appleOs: 'ios',
+      id: 'sim-1',
+      name: 'iPhone',
+      kind: 'simulator',
+      booted: true,
+    }),
+  );
   const response = await handleSessionCommands({
     req: {
       token: 't',
@@ -108,44 +89,16 @@ test('reinstall validates required args before device operations', async () => {
     },
     sessionName: 'default',
     logPath: '/tmp/daemon.log',
-    sessionStore,
+    sessionStore: store,
     invoke,
   });
-  expect(response).toBeTruthy();
-  if (!response) return;
-  expect(response.ok).toBe(false);
-  if (!response.ok) {
-    expect(response.error.code).toBe('INVALID_ARGS');
-    expect(response.error.message).toMatch(/reinstall <app> <path-to-app-binary>/i);
-  }
+  expect(response).toMatchObject({ ok: false, error: { code: 'INVALID_ARGS' } });
+  expect(mockInspectDeviceRuntimeFacts).not.toHaveBeenCalled();
+  expect(mockBindDeviceRuntime).not.toHaveBeenCalled();
 });
 
-test('install requires active session or explicit device selector', async () => {
-  const sessionStore = makeStore();
-  const response = await handleSessionCommands({
-    req: {
-      token: 't',
-      session: 'default',
-      command: 'install',
-      positionals: ['com.example.app', '/tmp/app.apk'],
-      flags: {},
-    },
-    sessionName: 'default',
-    logPath: '/tmp/daemon.log',
-    sessionStore,
-    invoke,
-  });
-  expect(response).toBeTruthy();
-  if (!response) return;
-  expect(response.ok).toBe(false);
-  if (!response.ok) {
-    expect(response.error.code).toBe('INVALID_ARGS');
-    expect(response.error.message).toMatch(/active session or an explicit device selector/i);
-  }
-});
-
-test('install omits app id fields when platform op cannot resolve them', async () => {
-  const sessionStore = makeStore();
+test('install binds the deployment use exactly once after one facts admission', async () => {
+  const store = makeStore();
   const session = makeSession('default', {
     platform: 'android',
     id: 'emulator-5554',
@@ -153,129 +106,143 @@ test('install omits app id fields when platform op cannot resolve them', async (
     kind: 'emulator',
     booted: true,
   });
-  sessionStore.set('default', session);
-  mockResolveTargetDevice.mockResolvedValue(session.device!);
-  const tempRoot = mkdtempForTestSync('agent-device-install-fallback-appid-');
-  const appPath = path.join(tempRoot, 'Sample.apk');
+  store.set(session.name, session);
+  const root = mkdtempForTestSync('agent-device-install-runtime-');
+  const appPath = path.join(root, 'Sample.apk');
   fs.writeFileSync(appPath, 'placeholder');
+  mockDeployAppRuntime.mockImplementation(async (input) => {
+    expect(input).toEqual({ app: '', appPath, replaceExisting: false });
+    return { packageName: 'com.example.detected', appName: 'Detected App' };
+  });
 
-  mockDefaultInstallOpsAndroid.mockResolvedValue({});
   const response = await handleSessionCommands({
     req: {
       token: 't',
-      session: 'default',
-      command: 'install',
-      positionals: ['Demo', appPath],
-      flags: {},
-    },
-    sessionName: 'default',
-    logPath: '/tmp/daemon.log',
-    sessionStore,
-    invoke,
-  });
-
-  expect(response).toBeTruthy();
-  if (!response) return;
-  expect(response.ok).toBe(true);
-  if (response.ok) {
-    expect(response.data?.platform).toBe('android');
-    expect(response.data?.appId).toBeUndefined();
-    expect(response.data?.package).toBeUndefined();
-    expect(response.data?.appPath).toBe(appPath);
-    expect(response.data?.archivePath).toBeUndefined();
-    expect(response.data?.installablePath).toBeUndefined();
-  }
-});
-
-test('install accepts path without app id hint', async () => {
-  const sessionStore = makeStore();
-  const session = makeSession('default', {
-    platform: 'android',
-    id: 'emulator-5554',
-    name: 'Pixel',
-    kind: 'emulator',
-    booted: true,
-  });
-  sessionStore.set('default', session);
-  mockResolveTargetDevice.mockResolvedValue(session.device!);
-  const tempRoot = mkdtempForTestSync('agent-device-install-path-only-');
-  const appPath = path.join(tempRoot, 'Sample.apk');
-  fs.writeFileSync(appPath, 'placeholder');
-
-  mockDefaultInstallOpsAndroid.mockImplementation(async (_device, app, pathToBinary) => {
-    expect(app).toBe('');
-    expect(pathToBinary).toBe(appPath);
-    return { package: 'com.example.detected' };
-  });
-  const response = await handleSessionCommands({
-    req: {
-      token: 't',
-      session: 'default',
+      session: session.name,
       command: 'install',
       positionals: [appPath],
       flags: {},
     },
-    sessionName: 'default',
+    sessionName: session.name,
     logPath: '/tmp/daemon.log',
-    sessionStore,
+    sessionStore: store,
     invoke,
   });
 
-  expect(response).toBeTruthy();
-  if (!response) return;
-  expect(response.ok).toBe(true);
-  if (response.ok) {
-    expect(response.data?.app).toBe('com.example.detected');
-    expect(response.data?.appId).toBe('com.example.detected');
-    expect(response.data?.package).toBe('com.example.detected');
-    expect(response.data?.appPath).toBe(appPath);
-  }
+  expect(response).toMatchObject({
+    ok: true,
+    data: {
+      platform: 'android',
+      app: 'com.example.detected',
+      appId: 'com.example.detected',
+      package: 'com.example.detected',
+      appName: 'Detected App',
+    },
+  });
+  expect(mockInspectDeviceRuntimeFacts).toHaveBeenCalledOnce();
+  expect(mockBindDeviceRuntime).toHaveBeenCalledOnce();
+  expect(mockBindDeviceRuntime.mock.calls[0]?.[1]).toMatchObject({
+    required: ['deployApp'],
+  });
 });
 
-test('reinstall resolves uploaded artifacts by id and cleans temp files after completion', async () => {
-  const sessionStore = makeStore();
+test('install fails closed before binding when its provider owner lacks deployment', async () => {
+  const store = makeStore();
+  const session = makeSession('default', {
+    platform: 'android',
+    id: 'provider:android:lease-a',
+    name: 'Provider Android',
+    kind: 'device',
+    booted: true,
+  });
+  store.set(session.name, session);
+  const root = mkdtempForTestSync('agent-device-install-provider-unavailable-');
+  const appPath = path.join(root, 'Sample.apk');
+  fs.writeFileSync(appPath, 'placeholder');
+  const inspectFacts = vi.fn(async (device) => {
+    const facts = await mockInspectDeviceRuntimeFacts(device);
+    return {
+      ...facts,
+      device: { ...facts.device, providerMode: 'provider-runtime' as const },
+      operations: {
+        ...facts.operations,
+        deployApp: { available: false, reason: 'owner-capability-missing' as const },
+      },
+    };
+  }) satisfies InspectDeviceRuntimeFacts;
+  const localExecution = vi.fn();
+  const bindCalls = vi.fn();
+  const bindDevice: BindDeviceRuntime = async (device, use) => {
+    bindCalls(device, use);
+    localExecution();
+    throw new Error('install must not bind after unavailable provider facts');
+  };
+
+  const response = await handleSessionCommands({
+    req: {
+      token: 't',
+      session: session.name,
+      command: 'install',
+      positionals: [appPath],
+      flags: {},
+    },
+    sessionName: session.name,
+    logPath: '/tmp/daemon.log',
+    sessionStore: store,
+    invoke,
+    inspectFacts,
+    bindDevice,
+  });
+
+  expect(response).toMatchObject({
+    ok: false,
+    error: { code: 'UNSUPPORTED_OPERATION', details: { reason: 'owner-capability-missing' } },
+  });
+  expect(inspectFacts).toHaveBeenCalledOnce();
+  expect(bindCalls).not.toHaveBeenCalled();
+  expect(localExecution).not.toHaveBeenCalled();
+  expect(mockDeployAppRuntime).not.toHaveBeenCalled();
+});
+
+test('reinstall cleans an uploaded artifact after the request-scoped operation', async () => {
+  const store = makeStore();
   const session = makeSession('default', {
     platform: 'apple',
+    appleOs: 'ios',
     id: 'sim-1',
     name: 'iPhone',
     kind: 'simulator',
     booted: true,
   });
-  sessionStore.set('default', session);
-  mockResolveTargetDevice.mockResolvedValue(session.device!);
-  const tempRoot = mkdtempForTestSync('agent-device-uploaded-artifact-');
-  const appPath = path.join(tempRoot, 'Sample.app');
+  store.set(session.name, session);
+  const root = mkdtempForTestSync('agent-device-uploaded-artifact-');
+  const appPath = path.join(root, 'Sample.app');
   fs.writeFileSync(appPath, 'placeholder');
-  const uploadedArtifactId = trackUploadedArtifact({ artifactPath: appPath, tempDir: tempRoot });
+  const uploadedArtifactId = trackUploadedArtifact({ artifactPath: appPath, tempDir: root });
+  mockDeployAppRuntime.mockResolvedValue({ bundleId: 'com.example.app' });
+  vi.mocked(resolveTargetDevice).mockResolvedValue(session.device);
 
-  mockDefaultReinstallOpsIos.mockImplementation(async (_device, app, pathToBinary) => {
-    expect(app).toBe('com.example.app');
-    expect(pathToBinary).toBe(appPath);
-    return { bundleId: 'com.example.app' };
-  });
   const response = await handleSessionCommands({
     req: {
       token: 't',
-      session: 'default',
+      session: session.name,
       command: 'reinstall',
       positionals: ['com.example.app', '/Users/dev/Downloads/Sample.app'],
       flags: {},
       meta: { uploadedArtifactId },
     },
-    sessionName: 'default',
+    sessionName: session.name,
     logPath: '/tmp/daemon.log',
-    sessionStore,
+    sessionStore: store,
     invoke,
   });
 
-  expect(response).toBeTruthy();
-  if (!response) return;
-  expect(response.ok).toBe(true);
-  expect(fs.existsSync(tempRoot)).toBe(false);
+  expect(response?.ok).toBe(true);
+  expect(fs.existsSync(root)).toBe(false);
 });
 
-test('HarmonyOS reinstall binds the resolved bundle to the active session', async () => {
-  const sessionStore = makeStore();
+test('HarmonyOS reinstall updates the active session identity from the runtime result', async () => {
+  const store = makeStore();
   const session = makeSession('default', {
     platform: 'harmonyos',
     id: '127.0.0.1:5555',
@@ -283,29 +250,28 @@ test('HarmonyOS reinstall binds the resolved bundle to the active session', asyn
     kind: 'emulator',
     booted: true,
   });
-  sessionStore.set('default', session);
-  mockResolveTargetDevice.mockResolvedValue(session.device);
-  const tempRoot = mkdtempForTestSync('agent-device-harmony-reinstall-');
-  const appPath = path.join(tempRoot, 'Sample.hap');
+  store.set(session.name, session);
+  const root = mkdtempForTestSync('agent-device-harmony-reinstall-');
+  const appPath = path.join(root, 'Sample.hap');
   fs.writeFileSync(appPath, 'placeholder');
-  mockDefaultReinstallOpsHarmony.mockResolvedValue({ package: 'com.example.application' });
+  mockDeployAppRuntime.mockResolvedValue({ packageName: 'com.example.application' });
 
   const response = await handleSessionCommands({
     req: {
       token: 't',
-      session: 'default',
+      session: session.name,
       command: 'reinstall',
       positionals: ['com.example.application', appPath],
       flags: {},
     },
-    sessionName: 'default',
+    sessionName: session.name,
     logPath: '/tmp/daemon.log',
-    sessionStore,
+    sessionStore: store,
     invoke,
   });
 
   expect(response?.ok).toBe(true);
-  expect(sessionStore.get('default')).toMatchObject({
+  expect(store.get(session.name)).toMatchObject({
     appBundleId: 'com.example.application',
     appName: 'com.example.application',
   });

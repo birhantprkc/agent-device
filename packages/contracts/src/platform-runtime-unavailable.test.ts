@@ -36,13 +36,17 @@ test('builds one complete combined unavailable owner without fake operations', a
     'appState',
     'bootTarget',
     'bootTargetHeadless',
+    'deployApp',
+    'deployMaterializedApp',
     'ensureReady',
     'listApps',
+    'materializeAppSource',
     'networkDump',
     'screenRecordingCleanup',
     'screenRecordingReattach',
     'screenRecordingStart',
     'shutdownTarget',
+    'sendPushNotification',
   ]);
   assert.deepEqual(binding.operations, {});
   await binding[Symbol.asyncDispose]();

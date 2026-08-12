@@ -40,14 +40,18 @@ export async function pushIosNotification(
   device: DeviceInfo,
   bundleId: string,
   payload: Record<string, unknown>,
+  options: Readonly<{ signal?: AbortSignal }> = {},
 ): Promise<void> {
   requireSimulatorDevice(device, 'push');
-  await ensureBootedSimulator(device);
+  options.signal?.throwIfAborted();
+  await ensureBootedSimulator(device, { signal: options.signal });
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-device-ios-push-'));
   const payloadPath = path.join(tempDir, 'payload.apns');
   try {
     await fs.writeFile(payloadPath, `${JSON.stringify(payload)}\n`, 'utf8');
-    await runSimctl(device, ['push', device.id, bundleId, payloadPath]);
+    await runSimctl(device, ['push', device.id, bundleId, payloadPath], {
+      signal: options.signal,
+    });
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

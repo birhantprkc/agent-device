@@ -1,4 +1,5 @@
 import { expect, test, vi } from 'vitest';
+import type { PlatformRuntimeOperations, RuntimeFacts } from '@agent-device/contracts/platform';
 import type { AppleOS, DeviceInfo } from '@agent-device/kernel/device';
 import { createApplePlatformRuntime } from './runtime.ts';
 import { platformRuntimeHostFixture } from './runtime.fixtures.ts';
@@ -45,12 +46,48 @@ test.each([
   ['visionOS simulator', leaves.visionos, true, undefined],
   ['watchOS sentinel', leaves.watchos, false, 'watchOS app logs are not supported'],
 ])('classifies the %s leaf explicitly', async (_name, device, available, hint) => {
-  const facts = await appleFacts(device);
+  const binding = await createApplePlatformRuntime(platformRuntimeHostFixture()).bind({
+    device,
+    intent: { kind: 'ordinary' },
+    scope: {
+      signal: new AbortController().signal,
+      diagnostics: { emit: () => {} },
+      progress: { report: () => {} },
+    },
+  });
+  assertAppleDeploymentFacts(binding, device);
+  assertAppleAppLogAndRecordingFacts(binding.facts, device, available, hint);
+  assertAppleReadinessFacts(binding.facts, device);
+});
+
+function assertAppleDeploymentFacts(
+  binding: Awaited<ReturnType<ReturnType<typeof createApplePlatformRuntime>['bind']>>,
+  device: DeviceInfo,
+): void {
+  const { facts } = binding;
   expect(facts.device.providerMode).toBe('local');
   expect(facts.operations.networkDump).toEqual({ available: true });
   expect(facts.operations.listApps.available).toBe(
     device.appleOs !== 'watchos' && device.iosPhysicalDeviceBackend !== 'xctest',
   );
+  const deploymentAvailable =
+    device.appleOs !== 'macos' &&
+    device.appleOs !== 'watchos' &&
+    !(device.kind === 'device' && device.iosPhysicalDeviceBackend === 'xctest');
+  for (const operation of ['deployApp', 'materializeAppSource', 'deployMaterializedApp'] as const) {
+    expect(facts.operations[operation].available).toBe(deploymentAvailable);
+  }
+  expect(facts.operations.sendPushNotification.available).toBe(
+    device.appleOs !== 'macos' && device.appleOs !== 'watchos' && device.kind === 'simulator',
+  );
+}
+
+function assertAppleAppLogAndRecordingFacts(
+  facts: RuntimeFacts<PlatformRuntimeOperations>,
+  device: DeviceInfo,
+  available: boolean,
+  hint: string | undefined,
+): void {
   for (const operation of ['appLogInspect', 'appLogDoctor', 'appLogStart'] as const) {
     const fact = facts.operations[operation];
     expect(fact.available).toBe(available);
@@ -73,12 +110,18 @@ test.each([
       hint: 'watchOS recording is not supported.',
     });
   }
+}
+
+function assertAppleReadinessFacts(
+  facts: RuntimeFacts<PlatformRuntimeOperations>,
+  device: DeviceInfo,
+): void {
   expect(facts.operations.ensureReady.available).toBe(device.appleOs !== 'watchos');
   expect(facts.operations.bootTarget.available).toBe(
     device.appleOs !== 'macos' && device.appleOs !== 'watchos',
   );
   expect(facts.operations.bootTargetHeadless.available).toBe(false);
-});
+}
 
 test.each([
   ['iOS simulator', leaves.ios, true, undefined],

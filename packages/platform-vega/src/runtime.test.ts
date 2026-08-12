@@ -22,6 +22,17 @@ test('classifies the Vega runtime denominator as unavailable', async () => {
     available: false,
     reason: 'unsupported-platform-leaf',
   });
+  for (const operation of [
+    'deployApp',
+    'materializeAppSource',
+    'deployMaterializedApp',
+    'sendPushNotification',
+  ] as const) {
+    expect(binding.facts.operations[operation]).toMatchObject({
+      available: false,
+      reason: 'unsupported-platform-leaf',
+    });
+  }
   expect(binding.facts.operations.appState).toMatchObject({ available: false });
   expect(binding.facts.operations.ensureReady).toMatchObject({ available: false });
   expect(binding.facts.operations.bootTarget).toMatchObject({ available: false });

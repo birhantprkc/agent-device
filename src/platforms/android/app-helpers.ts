@@ -5,7 +5,7 @@ import {
   parseAndroidLaunchablePackages,
   parseAndroidUserInstalledPackages,
 } from './app-parsers.ts';
-import { inferAndroidAppName } from './app-lifecycle.ts';
+import { inferAndroidAppName } from './app-deployment-resolution.ts';
 
 const ANDROID_LAUNCHER_CATEGORY = 'android.intent.category.LAUNCHER';
 const ANDROID_LEANBACK_CATEGORY = 'android.intent.category.LEANBACK_LAUNCHER';

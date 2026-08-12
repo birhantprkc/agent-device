@@ -1,7 +1,3 @@
-import { promises as fs } from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { resolveFileOverridePath, runCmd, whichCmd } from '../../utils/exec.ts';
 import { AppError } from '@agent-device/kernel/errors';
 import type { AppStateRuntimeResult } from '@agent-device/contracts/platform';
 import { sleep } from '../../utils/timeouts.ts';
@@ -9,18 +5,19 @@ import type { AppsFilter } from '@agent-device/contracts/device';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { isDeepLinkTarget } from '@agent-device/contracts/command';
 import { shellQuoteIfNeeded } from '../../utils/shell-quote.ts';
-import { createAppResolutionCache, type AppResolutionCacheScope } from '../app-resolution-cache.ts';
 import { waitForAndroidBoot } from './emulator-lifecycle.ts';
 import { runAndroidAdb } from './adb.ts';
 import {
   androidAdbResultError,
   createAndroidPortReverseManager,
-  installAndroidAdbPackage,
   resolveAndroidAdbProvider,
   type AndroidPortReverseEndpoint,
 } from './adb-executor.ts';
-import { classifyAndroidAppTarget } from './open-target.ts';
-import { prepareAndroidInstallArtifact } from './install-artifact.ts';
+import {
+  androidAppsDiscoveryHint,
+  inferAndroidAppName,
+  resolveAndroidApp,
+} from './app-deployment-resolution.ts';
 import {
   parseAndroidBlockingDialogFocus,
   parseAndroidLaunchablePackages,
@@ -30,16 +27,9 @@ import {
 
 export type { AndroidBlockingDialogFocus } from './app-parsers.ts';
 
-const ALIASES: Record<string, { type: 'intent' | 'package'; value: string }> = {
-  settings: { type: 'intent', value: 'android.settings.SETTINGS' },
-};
 const ANDROID_LAUNCHER_CATEGORY = 'android.intent.category.LAUNCHER';
 const ANDROID_LEANBACK_CATEGORY = 'android.intent.category.LEANBACK_LAUNCHER';
 const ANDROID_DEFAULT_CATEGORY = 'android.intent.category.DEFAULT';
-const ANDROID_APPS_DISCOVERY_HINT =
-  'Run agent-device apps --platform android to discover the installed package name, then retry open with that exact package.';
-const ANDROID_AMBIGUOUS_APP_HINT =
-  'Run agent-device apps --platform android to see the exact installed package names before retrying open.';
 const ANDROID_LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 const ANDROID_CLOSE_FOCUS_TIMEOUT_MS = 2_000;
 const ANDROID_CLOSE_FOCUS_POLL_MS = 50;
@@ -54,57 +44,6 @@ const ANDROID_FOREGROUND_COMMANDS = [
 ] as const;
 const ANDROID_FOCUS_LINE =
   /(?:(mCurrentFocus=Window\{)|(mFocusedApp=AppWindowToken\{)|(mResumedActivity:)|(ResumedActivity:))(.*)$/gm;
-
-type AndroidAppResolution = { type: 'intent' | 'package'; value: string };
-
-const androidAppResolutionCache = createAppResolutionCache<AndroidAppResolution>();
-
-function androidAppResolutionScope(device: DeviceInfo): AppResolutionCacheScope {
-  return { platform: 'android', deviceId: device.id, variant: device.target ?? '' };
-}
-
-export async function resolveAndroidApp(
-  device: DeviceInfo,
-  app: string,
-): Promise<AndroidAppResolution> {
-  const trimmed = app.trim();
-  if (classifyAndroidAppTarget(trimmed) === 'package') return { type: 'package', value: trimmed };
-
-  const alias = ALIASES[trimmed.toLowerCase()];
-  if (alias) return alias;
-
-  const cacheScope = androidAppResolutionScope(device);
-  const cached = androidAppResolutionCache.get(cacheScope, trimmed);
-  if (cached) return cached;
-
-  const result = await runAndroidAdb(device, ['shell', 'pm', 'list', 'packages']);
-  const packages = result.stdout
-    .split('\n')
-    .map((line: string) => line.replace('package:', '').trim())
-    .filter(Boolean);
-
-  const matches = packages.filter((pkg: string) =>
-    pkg.toLowerCase().includes(trimmed.toLowerCase()),
-  );
-  const match = matches[0];
-  if (match !== undefined && matches.length === 1) {
-    return androidAppResolutionCache.set(cacheScope, trimmed, {
-      type: 'package',
-      value: match,
-    });
-  }
-
-  if (matches.length > 1) {
-    throw new AppError('INVALID_ARGS', `Multiple packages matched "${app}"`, {
-      matches,
-      hint: ANDROID_AMBIGUOUS_APP_HINT,
-    });
-  }
-
-  throw new AppError('APP_NOT_INSTALLED', `No package found matching "${app}"`, {
-    hint: ANDROID_APPS_DISCOVERY_HINT,
-  });
-}
 
 export async function listAndroidApps(
   device: DeviceInfo,
@@ -173,39 +112,6 @@ function resolveAndroidLaunchCategories(
 async function listAndroidUserInstalledPackages(device: DeviceInfo): Promise<string[]> {
   const result = await runAndroidAdb(device, ['shell', 'pm', 'list', 'packages', '-3']);
   return parseAndroidUserInstalledPackages(result.stdout);
-}
-
-export function inferAndroidAppName(packageName: string): string {
-  const ignoredTokens = new Set([
-    'com',
-    'android',
-    'google',
-    'app',
-    'apps',
-    'service',
-    'services',
-    'mobile',
-    'client',
-  ]);
-  const tokens = packageName
-    .split('.')
-    .flatMap((segment) => segment.split(/[_-]+/))
-    .map((token) => token.trim().toLowerCase())
-    .filter((token) => token.length > 0);
-  // Fallback to last token if every token is ignored (e.g. "com.android.app.services" → "Services").
-  let chosen = tokens[tokens.length - 1] ?? packageName;
-  for (let index = tokens.length - 1; index >= 0; index -= 1) {
-    const token = tokens[index];
-    if (token && !ignoredTokens.has(token)) {
-      chosen = token;
-      break;
-    }
-  }
-  return chosen
-    .split(/[^a-z0-9]+/i)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
 }
 
 export async function getAndroidAppState(device: DeviceInfo): Promise<AppStateRuntimeResult> {
@@ -513,7 +419,7 @@ function androidDeepLinkPackageArgs(packageName: string | undefined): string[] {
 function buildAndroidPackageNotInstalledError(packageName: string): AppError {
   return new AppError('APP_NOT_INSTALLED', `No package found matching "${packageName}"`, {
     package: packageName,
-    hint: ANDROID_APPS_DISCOVERY_HINT,
+    hint: androidAppsDiscoveryHint,
   });
 }
 
@@ -694,204 +600,4 @@ async function isAndroidPackageProcessRunning(
     allowFailure: true,
   });
   return (result.stdout ?? '').trim().length > 0;
-}
-
-async function uninstallAndroidApp(device: DeviceInfo, app: string): Promise<{ package: string }> {
-  const resolved = await resolveAndroidApp(device, app);
-  if (resolved.type === 'intent') {
-    throw new AppError('INVALID_ARGS', 'App uninstall requires a package name, not an intent');
-  }
-  const result = await runAndroidAdb(device, ['uninstall', resolved.value], {
-    allowFailure: true,
-  });
-  if (result.exitCode !== 0) {
-    const output = `${result.stdout}\n${result.stderr}`.toLowerCase();
-    if (!output.includes('unknown package') && !output.includes('not installed')) {
-      throw androidAdbResultError(`adb uninstall failed for ${resolved.value}`, result);
-    }
-  }
-  return { package: resolved.value };
-}
-
-type BundletoolInvocation =
-  | { cmd: 'bundletool'; prefixArgs: readonly string[] }
-  | { cmd: 'java'; prefixArgs: readonly string[] };
-
-// Module-level cache for bundletool resolution.  Safe for the single-threaded
-// Node.js event loop; concurrent async callers may race to populate it but will
-// resolve to the same value since the inputs (PATH, env var) are stable per
-// process lifetime.
-let cachedBundletoolInvocation: { key: string; invocation: BundletoolInvocation } | null = null;
-
-function bundletoolInvocationCacheKey(): string {
-  return `${process.env.PATH ?? ''}::${process.env.AGENT_DEVICE_BUNDLETOOL_JAR ?? ''}`;
-}
-
-async function resolveBundletoolInvocation(): Promise<BundletoolInvocation> {
-  const cacheKey = bundletoolInvocationCacheKey();
-  if (cachedBundletoolInvocation?.key === cacheKey) {
-    return cachedBundletoolInvocation.invocation;
-  }
-
-  if (await whichCmd('bundletool')) {
-    const invocation = { cmd: 'bundletool', prefixArgs: [] } as const;
-    cachedBundletoolInvocation = { key: cacheKey, invocation };
-    return invocation;
-  }
-
-  const bundletoolJar = await resolveFileOverridePath(
-    process.env.AGENT_DEVICE_BUNDLETOOL_JAR,
-    'AGENT_DEVICE_BUNDLETOOL_JAR',
-  );
-  if (!bundletoolJar) {
-    throw new AppError(
-      'TOOL_MISSING',
-      'bundletool not found in PATH. Install bundletool or set AGENT_DEVICE_BUNDLETOOL_JAR to a bundletool-all.jar path.',
-    );
-  }
-  const invocation = { cmd: 'java', prefixArgs: ['-jar', bundletoolJar] } as const;
-  cachedBundletoolInvocation = { key: cacheKey, invocation };
-  return invocation;
-}
-
-async function runBundletool(args: string[]): Promise<void> {
-  const invocation = await resolveBundletoolInvocation();
-  await runCmd(invocation.cmd, [...invocation.prefixArgs, ...args]);
-}
-
-function isAndroidAppBundlePath(appPath: string): boolean {
-  return path.extname(appPath).toLowerCase() === '.aab';
-}
-
-async function installAndroidAppBundle(device: DeviceInfo, appPath: string): Promise<void> {
-  const provider = resolveAndroidAdbProvider(device);
-  const mode = 'universal';
-  if (provider.installBundle) {
-    await provider.installBundle(appPath, { mode });
-    return;
-  }
-
-  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'agent-device-aab-'));
-  const apksPath = path.join(tempDir, 'bundle.apks');
-  try {
-    await runBundletool(['build-apks', '--bundle', appPath, '--output', apksPath, '--mode', mode]);
-    await runBundletool(['install-apks', '--apks', apksPath, '--device-id', device.id]);
-  } finally {
-    await fs.rm(tempDir, { recursive: true, force: true });
-  }
-}
-
-async function installAndroidAppFiles(device: DeviceInfo, appPath: string): Promise<void> {
-  if (isAndroidAppBundlePath(appPath)) {
-    await installAndroidAppBundle(device, appPath);
-    return;
-  }
-  await installAndroidAdbPackage(appPath, {
-    device,
-    replace: true,
-  });
-}
-
-async function listInstalledAndroidPackages(device: DeviceInfo): Promise<Set<string>> {
-  const result = await runAndroidAdb(device, ['shell', 'pm', 'list', 'packages']);
-  return new Set(
-    result.stdout
-      .split('\n')
-      .map((line: string) => line.replace('package:', '').trim())
-      .filter(Boolean),
-  );
-}
-
-async function resolveInstalledAndroidPackageName(
-  device: DeviceInfo,
-  beforePackages: Set<string>,
-): Promise<string | undefined> {
-  const afterPackages = await listInstalledAndroidPackages(device);
-  const installedNow = Array.from(afterPackages).filter((pkg) => !beforePackages.has(pkg));
-  if (installedNow.length === 1) return installedNow[0];
-  return undefined;
-}
-
-export async function installAndroidInstallablePath(
-  device: DeviceInfo,
-  installablePath: string,
-): Promise<void> {
-  await androidAppResolutionCache.invalidateWhile(androidAppResolutionScope(device), async () => {
-    if (!device.booted) {
-      await waitForAndroidBoot(device.id);
-    }
-    await installAndroidAppFiles(device, installablePath);
-  });
-}
-
-export async function installAndroidInstallablePathAndResolvePackageName(
-  device: DeviceInfo,
-  installablePath: string,
-  packageNameHint?: string,
-): Promise<string | undefined> {
-  const beforePackages = packageNameHint ? undefined : await listInstalledAndroidPackages(device);
-  await installAndroidInstallablePath(device, installablePath);
-  return (
-    packageNameHint ??
-    (beforePackages ? await resolveInstalledAndroidPackageName(device, beforePackages) : undefined)
-  );
-}
-
-export async function installAndroidApp(
-  device: DeviceInfo,
-  appPath: string,
-): Promise<{
-  archivePath?: string;
-  installablePath: string;
-  packageName?: string;
-  appName?: string;
-  launchTarget?: string;
-}> {
-  if (!device.booted) {
-    await waitForAndroidBoot(device.id);
-  }
-  const prepared = await prepareAndroidInstallArtifact({ kind: 'path', path: appPath });
-  try {
-    const packageName = await installAndroidInstallablePathAndResolvePackageName(
-      device,
-      prepared.installablePath,
-      prepared.packageName,
-    );
-    const appName = packageName ? inferAndroidAppName(packageName) : undefined;
-    return {
-      archivePath: prepared.archivePath,
-      installablePath: prepared.installablePath,
-      packageName,
-      appName,
-      launchTarget: packageName,
-    };
-  } finally {
-    await prepared.cleanup();
-  }
-}
-
-export async function reinstallAndroidApp(
-  device: DeviceInfo,
-  app: string,
-  appPath: string,
-): Promise<{ package: string }> {
-  return await androidAppResolutionCache.invalidateWhile(
-    androidAppResolutionScope(device),
-    async () => {
-      if (!device.booted) {
-        await waitForAndroidBoot(device.id);
-      }
-      const { package: pkg } = await uninstallAndroidApp(device, app);
-      const prepared = await prepareAndroidInstallArtifact(
-        { kind: 'path', path: appPath },
-        { resolveIdentity: false },
-      );
-      try {
-        await installAndroidInstallablePath(device, prepared.installablePath);
-      } finally {
-        await prepared.cleanup();
-      }
-      return { package: pkg };
-    },
-  );
 }

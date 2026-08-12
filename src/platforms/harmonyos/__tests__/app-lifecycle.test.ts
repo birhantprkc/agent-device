@@ -7,11 +7,8 @@ vi.mock('../../../utils/exec.ts', async (importOriginal) => {
   return { ...actual, runCmd: vi.fn() };
 });
 
-vi.mock('../../../utils/timeouts.ts', () => ({ sleep: vi.fn() }));
-
 import {
   closeHarmonyApp,
-  installHarmonyApp,
   listHarmonyApps,
   parseHarmonyIsSystemApp,
   openHarmonyApp,
@@ -20,10 +17,8 @@ import {
   resolveHarmonyArchiveBundleName,
 } from '../app-lifecycle.ts';
 import { runCmd } from '../../../utils/exec.ts';
-import { sleep } from '../../../utils/timeouts.ts';
 
 const mockRunCmd = vi.mocked(runCmd);
-const mockSleep = vi.mocked(sleep);
 
 const DEVICE = {
   platform: 'harmonyos' as const,
@@ -37,7 +32,6 @@ const DEVICE = {
 beforeEach(() => {
   vi.useRealTimers();
   mockRunCmd.mockReset();
-  mockSleep.mockReset();
 });
 
 afterEach(() => {
@@ -93,6 +87,34 @@ test('resolveHarmonyArchiveBundleName reads module metadata through unzip', asyn
     ['-p', '/tmp/example.hap', 'module.json'],
   ]);
 });
+
+test('resolveHarmonyArchiveBundleName forwards the binding signal to in-flight unzip', async () => {
+  const controller = new AbortController();
+  const abortReason = new Error('request cancelled during Harmony archive resolution');
+  mockRunCmd.mockImplementationOnce(async (_command, _args, options) => {
+    assert.equal(options?.signal, controller.signal);
+    return await rejectWhenAborted(options?.signal);
+  });
+
+  const pending = resolveHarmonyArchiveBundleName('/tmp/example.hap', controller.signal);
+  controller.abort(abortReason);
+
+  await assert.rejects(pending, (error: unknown) => error === abortReason);
+});
+
+async function rejectWhenAborted(signal: AbortSignal | undefined): Promise<never> {
+  return await new Promise<never>((_resolve, reject) => {
+    if (!signal) {
+      reject(new Error('archive resolver did not receive the binding signal'));
+      return;
+    }
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+  });
+}
 
 test('HarmonyOS lifecycle commands use HDC bundle and ability primitives', async () => {
   mockRunCmd
@@ -309,33 +331,4 @@ test('HarmonyOS launch resolves module metadata and reports missing launch data'
 
   mockRunCmd.mockResolvedValueOnce({ exitCode: 0, stdout: 'not installed', stderr: '' });
   await assert.rejects(() => openHarmonyApp(DEVICE, 'com.example.missing'), /launchable ability/);
-});
-
-test('HarmonyOS install reads archive metadata, installs, and relaunches when requested', async () => {
-  mockRunCmd
-    .mockResolvedValueOnce({
-      exitCode: 0,
-      stdout: JSON.stringify({ app: { bundleName: 'com.example.application' } }),
-      stderr: '',
-    })
-    .mockResolvedValueOnce({ exitCode: 0, stdout: '', stderr: '' })
-    .mockResolvedValueOnce({
-      exitCode: 0,
-      stdout: JSON.stringify({ hapModuleInfos: [{ mainElementName: 'EntryAbility' }] }),
-      stderr: '',
-    })
-    .mockResolvedValueOnce({ exitCode: 0, stdout: 'start ability successfully', stderr: '' });
-
-  assert.deepEqual(await installHarmonyApp(DEVICE, '/tmp/example.hap', { relaunch: true }), {
-    package: 'com.example.application',
-    launchTarget: 'com.example.application',
-  });
-  assert.deepEqual(mockSleep.mock.calls, [[1_000]]);
-  assert.deepEqual(mockRunCmd.mock.calls[1]?.[1], [
-    '-t',
-    'harmony-1',
-    'install',
-    '-r',
-    '/tmp/example.hap',
-  ]);
 });

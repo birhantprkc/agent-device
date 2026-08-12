@@ -283,6 +283,7 @@ function unavailableProviderBinding(
   });
   return createUnavailablePlatformRuntimeBinding(device, owner, {
     appLog: unavailable,
+    appDeployment: unavailable,
     appState: unavailable,
     network: unavailable,
   });
@@ -296,7 +297,13 @@ function unavailableProviderFacts(runtime: ProviderDeviceRuntime, device: Device
   return createUnavailablePlatformRuntimeFacts(
     device,
     providerRuntimeOwner(runtime.provider, 'default'),
-    { appLog: unavailable, appState: unavailable, network: unavailable, readiness: unavailable },
+    {
+      appLog: unavailable,
+      appDeployment: unavailable,
+      appState: unavailable,
+      network: unavailable,
+      readiness: unavailable,
+    },
   );
 }
 

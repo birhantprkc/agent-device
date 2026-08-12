@@ -20,7 +20,7 @@ import type { RunnerContext } from '@agent-device/contracts/interaction';
 // the full {command x sample-device} matrix (iOS/iPadOS/tvOS/macOS/visionOS).
 // ---------------------------------------------------------------------------
 
-// `install`/`reinstall`/`install-from-source`/`push`/`home`/`app-switcher`
+// `home`/`app-switcher`
 // (was `!isMacOs(device)`). Off Apple (caps undefined) the original was
 // always true — no non-Apple platform is macOS.
 const supportsAppAndDeviceLifecycle = (device: DeviceInfo): boolean => {
@@ -32,9 +32,6 @@ const supportsCoreDevicePhysicalOperation = (device: DeviceInfo): boolean =>
   device.platform !== 'apple' ||
   device.kind !== 'device' ||
   device.iosPhysicalDeviceBackend !== 'xctest';
-
-const supportsAppInstallation = (device: DeviceInfo): boolean =>
-  supportsAppAndDeviceLifecycle(device) && supportsCoreDevicePhysicalOperation(device);
 
 // `keyboard` (was `android || (ios && target !== 'tv')`). Off Apple: `android`.
 const supportsKeyboard = (device: DeviceInfo): boolean => {
@@ -76,11 +73,7 @@ const supportsTvRemote = (device: DeviceInfo): boolean => {
 // Per-command support gates the Apple family applies by default, keyed exactly as in
 // the command-descriptor registry (a command absent here has no Apple gate).
 const APPLE_SUPPORTS_BY_DEFAULT: Record<string, (device: DeviceInfo) => boolean> = {
-  [PUBLIC_COMMANDS.install]: supportsAppInstallation,
-  [PUBLIC_COMMANDS.reinstall]: supportsAppInstallation,
-  [PUBLIC_COMMANDS.installFromSource]: supportsAppInstallation,
   [PUBLIC_COMMANDS.perf]: supportsCoreDevicePhysicalOperation,
-  [PUBLIC_COMMANDS.push]: supportsAppAndDeviceLifecycle,
   [PUBLIC_COMMANDS.home]: supportsAppAndDeviceLifecycle,
   [PUBLIC_COMMANDS.appSwitcher]: supportsAppAndDeviceLifecycle,
   [PUBLIC_COMMANDS.clipboard]: (device) =>
@@ -100,9 +93,6 @@ const APPLE_UNSUPPORTED_HINT_BY_DEFAULT: Record<
   string,
   (device: DeviceInfo) => string | undefined
 > = {
-  [PUBLIC_COMMANDS.install]: coreDeviceOnlyPhysicalOperationHint,
-  [PUBLIC_COMMANDS.reinstall]: coreDeviceOnlyPhysicalOperationHint,
-  [PUBLIC_COMMANDS.installFromSource]: coreDeviceOnlyPhysicalOperationHint,
   [PUBLIC_COMMANDS.perf]: coreDeviceOnlyPhysicalOperationHint,
   [PUBLIC_COMMANDS.viewport]: (device) =>
     device.platform === 'apple'

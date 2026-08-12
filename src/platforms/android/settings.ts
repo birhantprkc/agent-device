@@ -14,7 +14,7 @@ import { parseAppearanceAction } from '../appearance.ts';
 import { parseSettingState } from '../setting-state.ts';
 import { runAndroidAdb } from './adb.ts';
 import { androidAdbResultError } from './adb-executor.ts';
-import { resolveAndroidApp } from './app-lifecycle.ts';
+import { resolveAndroidApp } from './app-deployment-resolution.ts';
 
 const ANDROID_ANIMATION_SCALE_SETTINGS = [
   'window_animation_scale',
