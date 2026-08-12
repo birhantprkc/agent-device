@@ -224,23 +224,47 @@ async function capabilitiesInventoryResponse(params: {
     data: {
       device: publicDeviceInfo(device),
       availableCommands: listCapabilityCommands().filter((command) =>
-        command === PUBLIC_COMMANDS.logs
-          ? logsAvailable
-          : command === PUBLIC_COMMANDS.network
-            ? networkAvailable
-            : command === PUBLIC_COMMANDS.record
-              ? recordingAvailable
-              : command === PUBLIC_COMMANDS.apps
-                ? appsAvailable
-                : command === PUBLIC_COMMANDS.appState
-                  ? sessionOwnedAppStateAvailable || isAppStateRuntimeAvailable(facts)
-                  : command === PUBLIC_COMMANDS.shutdown
-                    ? facts?.operations.shutdownTarget?.available === true
-                    : (installFamilyCapabilityAvailable(command, facts) ??
-                      isCommandSupportedOnDevice(command, device)),
+        isCapabilityCommandAvailable(command, {
+          device,
+          facts,
+          logsAvailable,
+          networkAvailable,
+          recordingAvailable,
+          appsAvailable,
+          sessionOwnedAppStateAvailable,
+        }),
       ),
     },
   };
+}
+
+function isCapabilityCommandAvailable(
+  command: string,
+  availability: Readonly<{
+    device: DeviceInfo;
+    facts: Awaited<ReturnType<InspectDeviceRuntimeFacts>> | undefined;
+    logsAvailable: boolean;
+    networkAvailable: boolean;
+    recordingAvailable: boolean;
+    appsAvailable: boolean;
+    sessionOwnedAppStateAvailable: boolean;
+  }>,
+): boolean {
+  const projectedAvailability: Partial<Record<string, boolean>> = {
+    [PUBLIC_COMMANDS.logs]: availability.logsAvailable,
+    [PUBLIC_COMMANDS.network]: availability.networkAvailable,
+    [PUBLIC_COMMANDS.record]: availability.recordingAvailable,
+    [PUBLIC_COMMANDS.apps]: availability.appsAvailable,
+    [PUBLIC_COMMANDS.appState]:
+      availability.sessionOwnedAppStateAvailable || isAppStateRuntimeAvailable(availability.facts),
+    [PUBLIC_COMMANDS.shutdown]:
+      availability.facts?.operations.shutdownTarget?.available === true,
+  };
+  return (
+    projectedAvailability[command] ??
+    installFamilyCapabilityAvailable(command, availability.facts) ??
+    isCommandSupportedOnDevice(command, availability.device)
+  );
 }
 
 function isSessionOwnedAppStateAvailable(
