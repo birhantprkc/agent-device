@@ -58,19 +58,15 @@ export function duplicateRuleIds(declarations: readonly RuleDeclaration[]): stri
  * contact — see `ruleIdCollisionFailures`. Empty is the end state, and the gate
  * gets there on its own.
  *
- * The R13 half is gone: the device-inventory cutover became a row in the
- * parametrized runtime-command-cutover table and carries R17 there, so R13 now
- * names `platform-package-substrate` alone. R11 waits on #1750's R18 rename.
+ * The R11/R13 collisions were retired by the accepted R18 contracts and R17 devices
+ * allocations. New collisions fail closed; there is no transitional allowance left.
  */
-export const KNOWN_RULE_ID_COLLISIONS: readonly string[] = [
-  'R11 names contracts-implementation-authority and package-boundaries',
-];
+export const KNOWN_RULE_ID_COLLISIONS: readonly string[] = [];
 
 /**
- * Both halves of the transition, because an allowance that outlives the thing
- * it allows fails OPEN: once #1750 renames R11/R13 apart, a list still naming
- * those exact collisions would wave them straight back through if anyone
- * reintroduced them.
+ * Both halves of any transition, because an allowance that outlives the thing
+ * it allows fails OPEN: a list still naming a retired collision would wave it
+ * straight back through if anyone reintroduced it.
  *
  * So an allowance is only valid while its collision is actually present. A
  * collision nobody allowed fails, and an allowance whose collision is gone

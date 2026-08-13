@@ -144,6 +144,7 @@ test('capabilities excludes logs from an unavailable provider-mode XCTest runtim
   expect(availableCommands).not.toContain(PUBLIC_COMMANDS.open);
   expect(availableCommands).not.toContain(PUBLIC_COMMANDS.close);
   expect(availableCommands).not.toContain(PUBLIC_COMMANDS.prepare);
+  expect(availableCommands).not.toContain(PUBLIC_COMMANDS.shutdown);
   expect(runtime.inspections).toHaveLength(1);
   expect(runtime.uses).toEqual([
     { required: [], preferred: ['appLogInspect'] },
@@ -490,6 +491,7 @@ test('capabilities accepts a stopped Android AVD placeholder for explicit platfo
   expect(response.data?.availableCommands).toEqual(
     expect.arrayContaining(['open', 'screenshot', 'snapshot', 'press', 'fill']),
   );
+  expect(response.data?.availableCommands).toContain(PUBLIC_COMMANDS.shutdown);
 });
 
 function createAdmissionRuntime(options: {

@@ -3,8 +3,6 @@ import type {
   DeviceLease,
   LeaseLifecycleContext,
   LeaseLifecycleProvider,
-  ProviderDeviceInstallOptions,
-  ProviderDeviceInstallResult,
   ProviderDeviceRuntime,
   ProviderExpiredLeaseRecovery,
 } from '@agent-device/contracts/device';
@@ -14,7 +12,7 @@ import type {
   CloudArtifactsQuery,
   CloudArtifactsResult,
 } from '@agent-device/contracts/observability';
-import { publicPlatformString, type DeviceInfo } from '@agent-device/kernel/device';
+import type { DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
@@ -85,24 +83,6 @@ export function getProviderDeviceInteractor(
 
 export function isActiveProviderDevice(device: DeviceInfo): boolean {
   return getActiveProviderDeviceRuntimes().some((runtime) => runtime.ownsDevice(device));
-}
-
-export async function installProviderDeviceApp(
-  device: DeviceInfo,
-  app: string,
-  appPath: string,
-  options?: ProviderDeviceInstallOptions,
-): Promise<ProviderDeviceInstallResult | undefined> {
-  for (const runtime of getActiveProviderDeviceRuntimes()) {
-    if (!runtime.ownsDevice(device)) continue;
-    if (!runtime.installApp) {
-      throw unsupportedProviderOperation(runtime, device, 'install');
-    }
-    const result = await runtime.installApp?.(device, app, appPath, options);
-    if (result) return result;
-    throw unsupportedProviderOperation(runtime, device, 'install');
-  }
-  return undefined;
 }
 
 function getActiveProviderDeviceRuntimes(): ProviderDeviceRuntime[] {
@@ -292,16 +272,4 @@ function runtimeMatchesProvider(
   provider: string | undefined,
 ): boolean {
   return runtime.provider === provider;
-}
-
-function unsupportedProviderOperation(
-  runtime: ProviderDeviceRuntime,
-  device: DeviceInfo,
-  operation: string,
-): never {
-  throw new AppError(
-    'UNSUPPORTED_OPERATION',
-    `Provider device runtime ${runtime.provider} does not support ${operation} for this device.`,
-    { provider: runtime.provider, deviceId: device.id, platform: publicPlatformString(device) },
-  );
 }

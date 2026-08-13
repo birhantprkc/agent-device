@@ -320,7 +320,29 @@ async function openDirectApplication(
     appBundleId: input.appBundleId,
     execution: input.execution,
   });
+  const followUpUrl = followUpRuntimeLaunchUrl(input);
+  if (followUpUrl) {
+    await invokeApplicationOpen({
+      device: binding.device,
+      interactor,
+      positionals: [followUpUrl],
+      appBundleId: input.appBundleId,
+      execution: {
+        ...input.execution,
+        clearAppState: undefined,
+        launchConsole: undefined,
+        launchArgs: undefined,
+      },
+    });
+  }
   return { appBundleId: input.appBundleId, timing: {} };
+}
+
+function followUpRuntimeLaunchUrl(input: OpenApplicationInput): string | undefined {
+  const url = input.runtimeLaunchUrl?.trim();
+  const target = input.positionals.length === 1 ? input.positionals[0]?.trim() : undefined;
+  if (!url || !target || isDeepLinkTarget(target)) return undefined;
+  return url;
 }
 
 function resolveDirectOpenTarget(

@@ -4,6 +4,7 @@ import { checkRuntimeCommandCutover } from './runtime-command-cutover-policy.ts'
 import { rowFor, sources, summariesFor } from './runtime-command-cutover-fixtures.ts';
 import { cutoverTableDefects } from './runtime-command-cutover-model.ts';
 import { MIGRATED_COMMAND_CUTOVERS } from './runtime-command-cutover-table.ts';
+import { commandDescriptors } from '../../src/core/command-descriptor/registry.ts';
 
 test('R20 boot rejects the superseded root readiness adapter', () => {
   assert.deepEqual(
@@ -558,4 +559,19 @@ test('the cutover table rejects a duplicate rule id', () => {
     cutoverTableDefects([first, { ...first, command: 'planted' }]).join('\n'),
     /rule id .* is claimed by/,
   );
+});
+
+test('every daemon-routed migrated descriptor has exactly one cutover row', () => {
+  const migratedDescriptors = commandDescriptors
+    .filter(
+      (descriptor) =>
+        descriptor.daemon !== undefined &&
+        (descriptor.platformExecution.kind === 'inventory' ||
+          descriptor.platformExecution.kind === 'device-runtime'),
+    )
+    .map(({ name }) => name)
+    .sort();
+  const tableCommands = MIGRATED_COMMAND_CUTOVERS.map(({ command }) => command).sort();
+
+  assert.deepEqual(tableCommands, migratedDescriptors);
 });

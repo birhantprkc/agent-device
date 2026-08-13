@@ -276,6 +276,7 @@ const factOwnedCapabilityOperations: Readonly<
 > = Object.freeze({
   apps: ['ensureReady', 'listApps'],
   appstate: ['ensureReady', 'appState'],
+  shutdown: ['shutdownTarget'],
   open: ['resolveOpenTarget', 'prepareApplicationOpen', 'openApplication'],
   close: ['closeApplication', 'finalizeApplicationClose'],
   prepare: ['prepareAppleRunner'],
