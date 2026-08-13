@@ -13,9 +13,9 @@ const IOS_PRESENTATION_RULES: Array<
 > = [
   // Semantic representatives must be collected before duplicate-label suppression.
   collectIosWebSemanticPresentation,
-  collectIosPresentationNoiseSuppression,
   collectIosImplicitScrollableActions,
   collectIosRowPresentation,
+  collectIosPresentationNoiseSuppression,
 ];
 
 export function presentIosInteractiveSnapshot(nodes: RawSnapshotNode[]): RawSnapshotNode[] {

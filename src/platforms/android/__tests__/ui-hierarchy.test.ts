@@ -87,6 +87,21 @@ test('parseUiHierarchy keeps visible Android nodes with meaningful test identifi
   );
 });
 
+test('interactive Android snapshots keep Compose semantic views inside actionable parents', () => {
+  const xml = `<hierarchy>
+  <node class="android.view.View" package="com.example.app" bounds="[923,158][1049,284]" clickable="true" visible-to-user="true">
+    <node class="android.view.View" package="com.example.app" content-desc="Start a call" bounds="[954,189][1017,252]" visible-to-user="true"/>
+    <node class="android.widget.Button" package="com.example.app" bounds="[933,168][1038,273]" visible-to-user="true"/>
+  </node>
+</hierarchy>`;
+
+  const result = parseUiHierarchy(xml, 800, { interactiveOnly: true });
+
+  assert.equal(result.nodes[0]?.hittable, true);
+  assert.equal(result.nodes[1]?.label, 'Start a call');
+  assert.equal(result.nodes[1]?.parentIndex, 0);
+});
+
 test('interactive Android snapshots keep a fixed sibling outside filtered scroll content (#1377)', () => {
   const xml = `<hierarchy>
   <node class="android.widget.FrameLayout" bounds="[0,0][400,800]" visible-to-user="true">

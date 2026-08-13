@@ -116,7 +116,7 @@ function collectPromotableRowContent(
   for (const descendant of descendants) {
     if (
       removed.has(descendant.index) ||
-      !isPassiveRowContent(descendant) ||
+      !isPromotableRowContent(descendant, descendants) ||
       !isRectContainedBy(descendant.rect, parent.rect)
     ) {
       continue;
@@ -129,6 +129,23 @@ function collectPromotableRowContent(
     labels.push(label);
   }
   return { label: labels.join(', '), removableIndexes };
+}
+
+function isPromotableRowContent(node: SnapshotNode, descendants: SnapshotNode[]): boolean {
+  if (isPassiveRowContent(node)) return true;
+
+  // Jetpack Compose can expose a content description through a passive leaf
+  // `View` rather than TextView/ImageView. It is safe to associate only the
+  // app-provided label of a leaf with its actionable containing row: promoting
+  // a structural subtree could otherwise hide independently actionable nodes.
+  const type = (node.type ?? '').toLowerCase();
+  return (
+    node.hittable !== true &&
+    !isEditableNode(node) &&
+    type.includes('view') &&
+    visibleNodeLabel(node).trim().length > 0 &&
+    !descendants.some((candidate) => candidate.parentIndex === node.index)
+  );
 }
 
 function isPassiveRowContent(node: SnapshotNode): boolean {

@@ -805,7 +805,10 @@ function shouldIncludeInteractiveProxyNode(
 ): boolean {
   if (!info.hasMeaningfulText && !info.hasMeaningfulId) return false;
   if (info.isVisual) return false;
-  if (info.isStructural && !ancestorCollection) return false;
+  // Compose commonly places the app-owned content description on a passive
+  // `android.view.View` inside the clickable container. Keep that semantic
+  // proxy so presentation can associate the label with the action.
+  if (info.isStructural && !ancestorCollection && !ancestorHittable) return false;
   return ancestorHittable || descendantHittable || ancestorCollection;
 }
 

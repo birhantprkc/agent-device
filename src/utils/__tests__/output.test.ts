@@ -645,6 +645,38 @@ test('formatSnapshotText promotes Android helper unlabeled action rows', () => {
   assert.match(raw, /"Mobile, Wi-Fi, hotspot"/);
 });
 
+test('formatSnapshotText promotes Android Compose leaf-view semantics to their action', () => {
+  const text = withNoColor(() =>
+    formatSnapshotText({
+      nodes: [
+        {
+          ref: 'e1',
+          index: 0,
+          depth: 0,
+          type: 'android.view.View',
+          rect: { x: 923, y: 158, width: 126, height: 126 },
+          hittable: true,
+        },
+        {
+          ref: 'e2',
+          index: 1,
+          depth: 1,
+          parentIndex: 0,
+          type: 'android.view.View',
+          label: 'Start a call',
+          rect: { x: 954, y: 189, width: 63, height: 63 },
+        },
+      ],
+      truncated: false,
+      androidSnapshot: { backend: 'android-helper' },
+    }),
+  );
+
+  assert.match(text, /Snapshot: 1 visible nodes \(2 total\)/);
+  assert.match(text, /@e1 \[group\] "Start a call"/);
+  assert.doesNotMatch(text, /@e2/);
+});
+
 test('formatSnapshotText keeps passive row descendants that were not promoted', () => {
   const nodes = [
     {

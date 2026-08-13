@@ -1,5 +1,6 @@
 import type { RawSnapshotNode } from '@agent-device/kernel/snapshot';
 import { normalizeType } from '@agent-device/contracts/snapshot';
+import { isSystemScrollIndicatorLabel } from '../../../utils/scroll-indicator.ts';
 import {
   areRectsApproximatelyEqual,
   collectDescendants,
@@ -15,12 +16,49 @@ export function collectIosRowPresentation(
 ): void {
   for (let position = 0; position < nodes.length; position += 1) {
     const row = nodes[position];
-    const rowLabel = row?.label?.trim();
+    const rowLabel = row ? resolveIosRowLabel(nodes, position, row, context) : undefined;
     if (!row?.rect || !rowLabel) {
       continue;
     }
     collectIosRowPresentationForNode(nodes, position, row, rowLabel, context);
   }
+}
+
+function resolveIosRowLabel(
+  nodes: RawSnapshotNode[],
+  position: number,
+  row: RawSnapshotNode,
+  context: SnapshotTreeRuleContext,
+): string | undefined {
+  const rowLabel = row.label?.trim();
+  if (
+    normalizeType(row.type ?? '') !== 'cell' ||
+    (rowLabel && !isImplementationCellLabel(rowLabel) && !isSystemScrollIndicatorLabel(rowLabel))
+  ) {
+    return rowLabel;
+  }
+
+  const titleNode = collectDescendants(nodes, position).find(isIosRowTitleCandidate);
+  const title = titleNode?.label?.trim();
+  if (!titleNode || !title) {
+    return rowLabel;
+  }
+  mergeReplacement(context.replacements, row, { label: title });
+  context.suppressedIndexes.add(titleNode.index);
+  return title;
+}
+
+function isImplementationCellLabel(label: string): boolean {
+  return label !== 'Cell' && /^[A-Z_$][A-Za-z0-9_$]*Cell$/.test(label);
+}
+
+function isIosRowTitleCandidate(node: RawSnapshotNode): boolean {
+  const label = node.label?.trim();
+  if (!label) {
+    return false;
+  }
+  const type = normalizeType(node.type ?? '');
+  return type === 'statictext' || type === 'text' || type === 'textview';
 }
 
 function collectIosRowPresentationForNode(

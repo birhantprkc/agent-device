@@ -15,7 +15,8 @@ export function collectIosScrollIndicatorPresentation(
   context: SnapshotTreeRuleContext,
 ): void {
   for (const node of nodes) {
-    if (!isIosScrollIndicatorNode(node)) {
+    const presentedNode = context.replacements.get(node.index) ?? node;
+    if (!isIosScrollIndicatorNode(presentedNode)) {
       continue;
     }
     collectIosScrollIndicatorNodePresentation(node, context.sourceNodesByIndex, context);
