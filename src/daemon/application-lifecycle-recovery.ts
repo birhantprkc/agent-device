@@ -132,7 +132,6 @@ function finalizationInput(session: SessionState, stateDir: string) {
     surface: session.surface ?? 'app',
     retainRunner: false,
     stateDir,
-    sessionName: session.name,
   };
 }
 

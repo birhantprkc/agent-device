@@ -46,11 +46,6 @@ export function createAndroidApplicationTools(): AndroidApplicationTools {
       // ordinary text entry is still safe, so keep `open` successful. An already-active helper
       // without a fresh recovery marker remains unsafe and continues to fail closed below.
       if (!result.alreadyActive && !result.activated) {
-        emitDiagnostic({
-          level: 'warn',
-          phase: 'android_test_ime_persist_failed',
-          data: { device: device.id },
-        });
         return;
       }
       throw new AppError(

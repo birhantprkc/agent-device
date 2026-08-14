@@ -186,7 +186,6 @@ test('daemon lifecycle finalization admits facts once, binds once, and disposes 
     surface: 'app',
     retainRunner: false,
     stateDir: '/state',
-    sessionName: session.name,
     daemonShutdown: true,
   });
   expect(dispose).toHaveBeenCalledOnce();
