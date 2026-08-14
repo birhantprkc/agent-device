@@ -33,7 +33,9 @@ function resolveIosRowLabel(
   const rowLabel = row.label?.trim();
   if (
     normalizeType(row.type ?? '') !== 'cell' ||
-    (rowLabel && !isImplementationCellLabel(rowLabel) && !isSystemScrollIndicatorLabel(rowLabel))
+    (rowLabel &&
+      !isImplementationCellLabel(rowLabel, row.identifier) &&
+      !isSystemScrollIndicatorLabel(rowLabel))
   ) {
     return rowLabel;
   }
@@ -48,8 +50,8 @@ function resolveIosRowLabel(
   return title;
 }
 
-function isImplementationCellLabel(label: string): boolean {
-  return label !== 'Cell' && /^[A-Z_$][A-Za-z0-9_$]*Cell$/.test(label);
+function isImplementationCellLabel(label: string, identifier: string | undefined): boolean {
+  return identifier?.trim() === label && /^[A-Z_$][A-Za-z0-9_$]*Cell$/.test(label);
 }
 
 function isIosRowTitleCandidate(node: RawSnapshotNode): boolean {

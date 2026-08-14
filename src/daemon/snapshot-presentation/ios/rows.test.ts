@@ -13,8 +13,8 @@ test('iOS row presentation associates generic room cells with their descendant t
   expect(nodes.filter((node) => node.label === 'Team Standup')).toHaveLength(1);
 });
 
-test('iOS row presentation preserves a legitimate cell label', () => {
+test('iOS row presentation preserves a legitimate no-space cell label', () => {
   const nodes = presentIosInteractiveSnapshot(legitimatelyLabeledCellNodes);
 
-  expect(nodes.find((node) => node.type === 'Cell')?.label).toBe('Stem Cell');
+  expect(nodes.find((node) => node.type === 'Cell')?.label).toBe('StemCell');
 });

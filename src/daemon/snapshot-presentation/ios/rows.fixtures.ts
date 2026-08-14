@@ -44,7 +44,7 @@ export const legitimatelyLabeledCellNodes: RawSnapshotNode[] = [
     depth: 1,
     parentIndex: 0,
     type: 'Cell',
-    label: 'Stem Cell',
+    label: 'StemCell',
     rect: roomRowRect,
   },
   { index: 2, depth: 2, parentIndex: 1, type: 'StaticText', label: 'Research details' },
