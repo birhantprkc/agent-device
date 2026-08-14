@@ -1,5 +1,6 @@
 import { parseSync } from 'oxc-parser';
 import { visitAst } from './cutover-policy-ast.ts';
+import { retiredDispatchProjectionViolations } from './runtime-command-cutover-descriptor.ts';
 import {
   callName,
   countNamedCalls,
@@ -13,7 +14,7 @@ const RUNTIME_ADMISSION_MODULE = 'src/daemon/runtime-admission.ts';
 const APPLICATION_RESOURCES_FILE = 'src/platform-runtime-application-resources.ts';
 const RUNTIME_ADMISSION_HELPERS = ['admitRuntimeUse', 'admitRuntimeOperations'];
 
-type LifecycleAdmissionRule = Readonly<{ functionName: string }>;
+type LifecycleAdmissionRule = Readonly<{ functionName: string; file?: string }>;
 
 type LifecycleHandlerRule = Readonly<{
   command: 'open' | 'prepare' | 'close' | 'runtime';
@@ -67,7 +68,10 @@ const LIFECYCLE_HANDLER_RULES = {
     file: 'src/daemon/handlers/session-runtime-command.ts',
     admissions: [
       { functionName: 'admitClearRuntime' },
-      { functionName: 'admitPortReverseRuntime' },
+      {
+        functionName: 'handlePortReverseCommand',
+        file: 'src/daemon/handlers/session-runtime-port-reverse.ts',
+      },
     ],
     forbiddenCalls: [
       ...RAW_RUNTIME_GATEWAY_CALLS,
@@ -83,8 +87,10 @@ export const openLifecycleRouteBindingViolations = (sources: ReadonlyMap<string,
   lifecycleHandlerRouteBindingViolations(sources, LIFECYCLE_HANDLER_RULES.open);
 export const prepareLifecycleRouteBindingViolations = (sources: ReadonlyMap<string, string>) =>
   lifecycleHandlerRouteBindingViolations(sources, LIFECYCLE_HANDLER_RULES.prepare);
-export const closeLifecycleRouteBindingViolations = (sources: ReadonlyMap<string, string>) =>
-  lifecycleHandlerRouteBindingViolations(sources, LIFECYCLE_HANDLER_RULES.close);
+export const closeLifecycleRouteBindingViolations = (sources: ReadonlyMap<string, string>) => [
+  ...lifecycleHandlerRouteBindingViolations(sources, LIFECYCLE_HANDLER_RULES.close),
+  ...retiredDispatchProjectionViolations(sources, 'close'),
+];
 export const runtimeLifecycleRouteBindingViolations = (sources: ReadonlyMap<string, string>) =>
   lifecycleHandlerRouteBindingViolations(sources, LIFECYCLE_HANDLER_RULES.runtime);
 
@@ -102,13 +108,23 @@ function lifecycleHandlerRouteBindingViolations(
       },
     ];
   }
-  const program = parseSync(rule.file, source).program as CutoverAstNode;
   const violations: UnruledViolation[] = [];
   for (const admission of rule.admissions) {
+    const admissionFile = admission.file ?? rule.file;
+    const admissionSource = sources.get(admissionFile);
+    if (admissionSource === undefined) {
+      violations.push({
+        file: admissionFile,
+        line: 1,
+        message: `${rule.command} lifecycle handler module is missing`,
+      });
+      continue;
+    }
+    const program = parseSync(admissionFile, admissionSource).program as CutoverAstNode;
     const functionNode = namedFunction(program, admission.functionName);
     if (functionNode === undefined) {
       violations.push({
-        file: rule.file,
+        file: admissionFile,
         line: 1,
         message: `${rule.command} must retain its ${admission.functionName} admission seam`,
       });
@@ -120,21 +136,27 @@ function lifecycleHandlerRouteBindingViolations(
     );
     if (admissionCalls !== 1) {
       violations.push({
-        file: rule.file,
-        line: lineOf(source, functionNode),
+        file: admissionFile,
+        line: lineOf(admissionSource, functionNode),
         message: `${rule.command} ${admission.functionName} must make one shared runtime admission call (found ${admissionCalls})`,
       });
     }
   }
-  visitAst(program, (node) => {
-    const call = callName(node);
-    if (call === undefined || !rule.forbiddenCalls.includes(call)) return;
-    violations.push({
-      file: rule.file,
-      line: lineOf(source, node),
-      message: `${rule.command} handler reaches legacy or local platform call ${call} outside its bound runtime`,
+  const routeFiles = new Set([rule.file, ...rule.admissions.flatMap(({ file }) => file ?? [])]);
+  for (const routeFile of routeFiles) {
+    const routeSource = sources.get(routeFile);
+    if (routeSource === undefined) continue;
+    const program = parseSync(routeFile, routeSource).program as CutoverAstNode;
+    visitAst(program, (node) => {
+      const call = callName(node);
+      if (call === undefined || !rule.forbiddenCalls.includes(call)) return;
+      violations.push({
+        file: routeFile,
+        line: lineOf(routeSource, node),
+        message: `${rule.command} handler reaches legacy or local platform call ${call} outside its bound runtime`,
+      });
     });
-  });
+  }
   violations.push(...sharedRuntimeAdmissionViolations(sources));
   return violations;
 }

@@ -184,6 +184,8 @@ const OPEN_HANDLER_FILE = 'src/daemon/handlers/session-open.ts';
 const PREPARE_HANDLER_FILE = 'src/daemon/handlers/session-prepare.ts';
 const CLOSE_HANDLER_FILE = 'src/daemon/handlers/session-close-runtime-admission.ts';
 const RUNTIME_HANDLER_FILE = 'src/daemon/handlers/session-runtime-command.ts';
+const PORT_REVERSE_HANDLER_FILE = 'src/daemon/handlers/session-runtime-port-reverse.ts';
+const COMMAND_DESCRIPTOR_FILE = 'src/core/command-descriptor/registry.ts';
 
 const RUNTIME_ADMISSION_FILE = 'src/daemon/runtime-admission.ts';
 
@@ -204,7 +206,14 @@ function lifecycleAdmissionSource(functionName: string, admissionHelper: string)
 }
 
 function lifecycleSources(entries: readonly (readonly [string, string])[]) {
-  return sources([...entries, [RUNTIME_ADMISSION_FILE, RUNTIME_ADMISSION_SOURCE]]);
+  return sources([
+    [
+      COMMAND_DESCRIPTOR_FILE,
+      "export const descriptors = [{ name: 'close', platformExecution: { kind: 'device-runtime' } }];",
+    ],
+    ...entries,
+    [RUNTIME_ADMISSION_FILE, RUNTIME_ADMISSION_SOURCE],
+  ]);
 }
 
 test('lifecycle route proofs accept one shared admission per descriptor operation', () => {
@@ -235,12 +244,10 @@ test('lifecycle route proofs accept one shared admission per descriptor operatio
   assert.deepEqual(
     runtimeLifecycleRouteBindingViolations(
       lifecycleSources([
+        [RUNTIME_HANDLER_FILE, lifecycleAdmissionSource('admitClearRuntime', 'admitRuntimeUse')],
         [
-          RUNTIME_HANDLER_FILE,
-          [
-            lifecycleAdmissionSource('admitClearRuntime', 'admitRuntimeUse'),
-            lifecycleAdmissionSource('admitPortReverseRuntime', 'admitRuntimeUse'),
-          ].join('\n'),
+          PORT_REVERSE_HANDLER_FILE,
+          lifecycleAdmissionSource('handlePortReverseCommand', 'admitRuntimeUse'),
         ],
       ]),
     ),
@@ -294,6 +301,23 @@ test('planted red: lifecycle route proof rejects a handler that calls the raw ga
 
   assert.match(summaries(violations).join('\n'), /platform call inspectFacts outside its bound/);
   assert.match(summaries(violations).join('\n'), /platform call bindDevice outside its bound/);
+});
+
+test('planted red: close cutover rejects a legacy dispatch projection', () => {
+  const violations = closeLifecycleRouteBindingViolations(
+    lifecycleSources([
+      [CLOSE_HANDLER_FILE, lifecycleAdmissionSource('admitCloseRuntime', 'admitRuntimeUse')],
+      [
+        COMMAND_DESCRIPTOR_FILE,
+        "export const descriptors = [{ name: 'close', dispatch: {}, platformExecution: { kind: 'device-runtime' } }];",
+      ],
+    ]),
+  );
+
+  assert.match(
+    summaries(violations).join('\n'),
+    /still projects into the retired legacy dispatcher/,
+  );
 });
 
 test('planted red: lifecycle route proof rejects a shared admission with two facts inspections', () => {

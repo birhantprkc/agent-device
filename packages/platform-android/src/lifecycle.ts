@@ -6,11 +6,11 @@ import type {
 } from '@agent-device/contracts/platform';
 import {
   bindLocalApplicationLifecycleInteractor,
+  followUpRuntimeLaunchUrl,
   hasRuntimeTransportHintValues,
   invokeApplicationClose,
   invokeApplicationOpen,
 } from '@agent-device/contracts/platform';
-import { isDeepLinkTarget } from '@agent-device/contracts/command';
 import { ensureAndroidReady } from './readiness/runtime.ts';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
@@ -72,7 +72,6 @@ export function bindAndroidApplicationLifecycle(
     finalizeApplicationClose: async (input) => {
       await host.androidApplications.restoreTestIme(device, {
         stateDir: input.stateDir,
-        sessionName: input.sessionName,
       });
       const shutdown =
         input.shutdownTarget && device.kind === 'emulator'
@@ -167,13 +166,6 @@ async function openAndroidApplication(
   }
   timing.postOpenSettleDurationMs = 0;
   return { appBundleId, timing };
-}
-
-function followUpRuntimeLaunchUrl(input: OpenApplicationInput): string | undefined {
-  const url = input.runtimeLaunchUrl?.trim();
-  const target = input.positionals.length === 1 ? input.positionals[0]?.trim() : undefined;
-  if (!url || !target || isDeepLinkTarget(target)) return undefined;
-  return url;
 }
 
 function elapsed(startedAtMs: number): number {

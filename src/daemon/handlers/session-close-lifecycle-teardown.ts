@@ -103,7 +103,6 @@ export async function runSessionCloseTeardown(params: {
         surface: session.surface ?? 'app',
         retainRunner: retainAppleRunner,
         stateDir: sessionStore.resolveDaemonStateDir(),
-        sessionName,
         shutdownTarget: req.flags?.shutdown === true,
       })) ?? {},
   );

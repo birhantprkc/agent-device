@@ -42,6 +42,17 @@ export function createAndroidApplicationTools(): AndroidApplicationTools {
         return;
       }
       if (!result.persistFailed) return;
+      // Persistence can fail before the IME switch. In that case the durable invariant held and
+      // ordinary text entry is still safe, so keep `open` successful. An already-active helper
+      // without a fresh recovery marker remains unsafe and continues to fail closed below.
+      if (!result.alreadyActive && !result.activated) {
+        emitDiagnostic({
+          level: 'warn',
+          phase: 'android_test_ime_persist_failed',
+          data: { device: device.id },
+        });
+        return;
+      }
       throw new AppError(
         'COMMAND_FAILED',
         `Android test IME recovery records could not be persisted for ${device.name ?? device.id}.`,

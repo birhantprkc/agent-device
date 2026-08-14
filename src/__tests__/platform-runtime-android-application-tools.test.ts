@@ -40,11 +40,24 @@ describe('android application tools: test IME activation policy', () => {
     ).resolves.toBeUndefined();
   });
 
-  test('a failed durable recovery-record fence rejects before the caller continues', async () => {
+  test('a pre-switch persistence failure keeps the open successful without switching IME', async () => {
     activateAndroidTestIme.mockResolvedValueOnce({
       ...settled,
       activated: false,
       alreadyActive: false,
+      persistFailed: true,
+    });
+
+    await expect(
+      createAndroidApplicationTools().activateTestIme(device, { stateDir: '/state' }),
+    ).resolves.toBeUndefined();
+  });
+
+  test('an already-active helper without a fresh recovery marker still fails closed', async () => {
+    activateAndroidTestIme.mockResolvedValueOnce({
+      ...settled,
+      activated: false,
+      alreadyActive: true,
       persistFailed: true,
     });
 

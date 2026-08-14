@@ -627,7 +627,12 @@ export const RAW_COMMAND_DESCRIPTORS = [
   {
     name: 'runtime',
     ...(ownerFilesEnabled
-      ? { ownerFiles: ['src/daemon/handlers/session-runtime-command.ts'] as const }
+      ? {
+          ownerFiles: [
+            'src/daemon/handlers/session-runtime-command.ts',
+            'src/daemon/handlers/session-runtime-port-reverse.ts',
+          ] as const,
+        }
       : {}),
     catalog: { group: 'internal' },
     recordsSessionAction: false,
@@ -799,7 +804,6 @@ export const RAW_COMMAND_DESCRIPTORS = [
       allowInvalidRecording: true,
       saveScriptFlagOwner: true,
     },
-    dispatch: {},
     timeoutPolicy: DEFAULT_TIMEOUT_POLICY,
     batchable: true,
     platformExecution: { kind: 'device-runtime', uses: closeApplicationRuntimePlanUses },

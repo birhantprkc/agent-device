@@ -145,17 +145,6 @@ type DispatchHandler = (args: DispatchHandlerArgs) => Promise<Record<string, unk
  * behaviorless.
  */
 const DISPATCH_HANDLERS: Record<DispatchCommand, DispatchHandler> = {
-  close: async ({ device, interactor, positionals }) => {
-    const app = positionals[0];
-    if (!app) {
-      if (device.platform === 'web') {
-        await interactor.close('');
-      }
-      return { closed: 'session', ...successText('Closed session') };
-    }
-    await interactor.close(app);
-    return { app, ...successText(`Closed: ${app}`) };
-  },
   press: ({ device, interactor, positionals, context }) =>
     handlePressCommand(device, interactor, positionals, context),
   longpress: ({ interactor, positionals }) => handleLongPressCommand(interactor, positionals),

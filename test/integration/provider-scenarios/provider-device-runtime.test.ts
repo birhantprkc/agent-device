@@ -169,6 +169,13 @@ function providerScenarioSteps(
       expectData: { provider: { provider: FAKE_PROVIDER } },
     },
     {
+      name: 'port-reverse',
+      command: 'runtime',
+      positionals: ['port-reverse'],
+      flags: DEVTOOLS_PORT_REVERSE,
+      expectData: { action: 'port-reverse', ...portReverse },
+    },
+    {
       name: 'install',
       command: 'install',
       positionals: [appPath],
@@ -186,13 +193,6 @@ function providerScenarioSteps(
     },
     { name: 'click', command: 'click', positionals: ['10', '20'], expectData: { x: 10, y: 20 } },
     { name: 'snapshot', command: 'snapshot' },
-    {
-      name: 'port-reverse',
-      command: 'runtime',
-      positionals: ['port-reverse'],
-      flags: DEVTOOLS_PORT_REVERSE,
-      expectData: { action: 'port-reverse', ...portReverse },
-    },
     {
       name: 'release',
       command: 'lease_release',
@@ -258,12 +258,13 @@ function assertFakeProviderCallOrder(calls: FakeProviderCall[]): void {
       'lease.allocate',
       'lease.heartbeat',
       'inventory',
+      'portReverse.ensure',
+      'inventory',
       'install',
       'inventory',
       'open',
       'tap',
       'snapshot',
-      'portReverse.ensure',
       'lease.release',
     ],
   );

@@ -279,6 +279,7 @@ export {
   bindDirectApplicationLifecycle,
   bindLocalApplicationLifecycleInteractor,
   bindProviderApplicationLifecycleInteractor,
+  followUpRuntimeLaunchUrl,
   invokeApplicationClose,
   invokeApplicationOpen,
 } from '../application-lifecycle-interaction.ts';

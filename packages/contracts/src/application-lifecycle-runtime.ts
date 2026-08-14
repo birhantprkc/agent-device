@@ -129,7 +129,6 @@ export type CloseApplicationFinalizationInput = Readonly<{
   surface: SessionSurface;
   retainRunner: boolean;
   stateDir: string;
-  sessionName: string;
   /** Daemon shutdown defers runner termination to the gateway's single final phase. */
   daemonShutdown?: boolean;
   /** `close --shutdown` is an admitted close finalization effect, never a daemon fallback. */
@@ -296,10 +295,7 @@ export type AndroidApplicationTools = Readonly<{
   applyRuntimeHints(device: DeviceInfo, input: RuntimeHintsApplicationInput): Promise<void>;
   clearRuntimeHints(device: DeviceInfo, input: RuntimeHintsApplicationInput): Promise<void>;
   activateTestIme(device: DeviceInfo, input: Readonly<{ stateDir: string }>): Promise<void>;
-  restoreTestIme(
-    device: DeviceInfo,
-    input: Readonly<{ stateDir: string; sessionName: string }>,
-  ): Promise<void>;
+  restoreTestIme(device: DeviceInfo, input: Readonly<{ stateDir: string }>): Promise<void>;
   recoverTestImeStartup(input: Readonly<{ stateDir: string }>): Promise<void>;
   hasTestImeRecoveryEvidence(stateDir: string): Promise<boolean>;
 }>;

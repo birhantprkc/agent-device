@@ -338,7 +338,7 @@ async function openDirectApplication(
   return { appBundleId: input.appBundleId, timing: {} };
 }
 
-function followUpRuntimeLaunchUrl(input: OpenApplicationInput): string | undefined {
+export function followUpRuntimeLaunchUrl(input: OpenApplicationInput): string | undefined {
   const url = input.runtimeLaunchUrl?.trim();
   const target = input.positionals.length === 1 ? input.positionals[0]?.trim() : undefined;
   if (!url || !target || isDeepLinkTarget(target)) return undefined;
