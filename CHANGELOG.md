@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed: Replay test artifacts with colliding filenames retain distinct copies without overwriting
+  other diagnostics, replay sources, timing traces, or attempt manifests.
 - Fixed: Custom test reporters reject invalid exit codes, including values such as `256` that
   could wrap to success and hide a failing suite. `getExitCode` accepts integers from `0` to `255`
   or `undefined`; JSON output reports an invalid code as one `INVALID_ARGS` error.
